@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhatsApp Scheduler</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header><div><div class="eyebrow">ЛОКАЛЬНО · НА ВАШЕМ КОМПЬЮТЕРЕ</div><h1>WhatsApp Scheduler</h1></div><span id="connection" class="badge">Подключение…</span></header>
+  <section id="auth" hidden><div><h2>Подключите WhatsApp</h2><p>WhatsApp → Связанные устройства → Привязать устройство.</p><p class="muted">Отсканируйте QR-код телефоном. Пароль не требуется.</p></div><img id="qr" alt="QR-код для подключения WhatsApp" width="240" height="240"></section>
+  <p id="connection-error" class="warning" hidden></p>
+  <div class="sync"><span id="sync-note" class="muted">Списки чатов появятся после подключения.</span><button id="refresh">Обновить списки</button></div>
+  <nav aria-label="Разделы"><button class="tab selected" data-tab="schedules">Расписания</button><button class="tab" data-tab="history">История</button><button class="tab" data-tab="settings">Настройки</button></nav>
+  <p id="feedback" role="status" aria-live="polite" hidden></p>
+  <section id="schedules-panel">
+    <div class="section-head"><div><h2>Ваши расписания</h2><p class="muted">Расписание использует локальное время этого компьютера.</p></div><button id="new" class="primary">+ Новое расписание</button></div>
+    <p id="paused" class="warning" hidden>Все расписания приостановлены. Возобновите их в настройках или меню области уведомлений.</p>
+    <div id="schedule-list"></div>
+  </section>
+  <section id="history-panel" hidden><h2>История отправок</h2><p class="muted">Последние 30 дней, до 5 000 записей. «Отправлено» означает принятие сообщения WhatsApp, а не прочтение получателем.</p><div id="history-list"></div></section>
+  <section id="settings-panel" hidden>
+    <h2>Настройки</h2>
+    <div class="settings-box"><label class="check"><input id="autostart" type="checkbox">Запускать вместе с Windows</label><label class="check"><input id="global-paused" type="checkbox">Приостановить все расписания</label>
+    <label for="grace">Отправлять пропущенное сообщение, если задержка не больше:</label><select id="grace"><option value="5">5 минут</option><option value="15">15 минут</option><option value="30">30 минут</option><option value="60">60 минут</option><option value="0">Не отправлять пропущенные</option></select>
+    <p class="muted">После сна для каждого повторяющегося расписания отправляется максимум одно актуальное пропущенное сообщение.</p><button id="save-settings" class="primary">Сохранить настройки</button></div>
+    <p class="muted">Компьютер должен быть включён, приложение — запущено или свёрнуто в область уведомлений. Нужен интернет.</p>
+  </section>
+  <footer>Неофициальная интеграция. Данные хранятся на этом компьютере.</footer>
+</main>
+<dialog id="editor">
+  <form id="schedule-form" novalidate>
+    <div class="section-head"><h2 id="editor-title">Новое расписание</h2><button type="button" id="close-editor" aria-label="Закрыть">×</button></div>
+    <label>Получатель</label><div class="segments"><label><input type="radio" name="recipient-kind" value="personal" checked>Личный чат</label><label><input type="radio" name="recipient-kind" value="group">Группа</label></div>
+    <input id="recipient-search" type="search" placeholder="Поиск получателя" aria-label="Поиск получателя">
+    <select id="recipient" aria-label="Получатель"><option value="">Выберите получателя</option></select>
+    <p id="recipient-note" class="muted small"></p>
+    <label for="message">Сообщение</label><textarea id="message" rows="4" maxlength="10000" placeholder="Введите сообщение…"></textarea>
+    <label for="schedule-kind">Расписание</label><select id="schedule-kind"><option value="once">Одноразовое</option><option value="weekly">Повторяющееся по дням недели</option></select>
+    <div id="once-fields" class="columns"><label>Дата<input id="once-date" type="date"></label><label>Время<input id="once-time" type="time" step="60"></label></div>
+    <div id="weekly-fields" hidden><div id="weekdays" class="days"></div><div class="columns"><label>От<input id="from" type="time" value="08:00" step="60"></label><label>До<input id="to" type="time" value="08:00" step="60"></label><label>Каждые<input id="interval" type="text" inputmode="numeric" value="00:30" placeholder="HH:MM" maxlength="5"></label></div><p class="muted small">Если «От» = «До», отправляется одно сообщение в выбранные дни. Диапазоны через полночь не поддерживаются.</p></div>
+    <p class="muted small">Расписание использует локальное время этого компьютера.</p>
+    <p id="form-error" class="error" role="alert" hidden></p><p id="test-result" role="status" hidden></p>
+    <div class="actions"><button type="button" id="test">Отправить тест</button><button type="button" id="cancel">Отмена</button><button type="submit" id="save" class="primary">Сохранить</button></div>
+  </form>
+</dialog>
+<script src="app.js"></script>
+</body></html>
