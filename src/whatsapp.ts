@@ -75,9 +75,10 @@ export class WhatsApp {
           if (update.connection === 'open') {
             this.qr = ''; this.status = 'WhatsApp подключён'; this.retries = 0;
             this.syncNote = 'Синхронизация чатов…'; this.changed();
-            void this.refresh().catch(() => { this.syncNote = 'Не удалось обновить группы. Попробуйте «Обновить списки».'; this.changed(); });
+            void this.refresh(false).catch(() => { this.syncNote = 'Не удалось обновить группы. Попробуйте «Обновить списки».'; this.changed(); });
           }
           if (update.connection === 'close') {
+            ++this.generation; // Ignore late events from the disconnected socket.
             this.qr = ''; this.socket = undefined;
             const code = (update.lastDisconnect?.error as any)?.output?.statusCode;
             if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession) {
@@ -101,7 +102,7 @@ export class WhatsApp {
         for (const c of list) if (c.name || c.notify || c.verifiedName) this.names.set(c.id, c.name || c.notify || c.verifiedName!);
         this.store.change(d => { for (const r of d.recipients) r.name = this.names.get(r.jid) || r.name; }); this.changed();
       };
-      const chats = (list: Array<{ id: string; name?: string }>) => {
+      const chats = (list: Array<{ id: string; name?: string | null }>) => {
         if (!active()) return;
         this.store.change(d => {
           for (const c of list) {
@@ -132,13 +133,16 @@ export class WhatsApp {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => { void this.connect(); }, ms);
   }
-  async refresh(): Promise<void> {
+  async refresh(resync = true): Promise<void> {
     if (!this.connected || !this.socket) throw new Error('Нет соединения с WhatsApp.');
     const groups = await this.socket.groupFetchAllParticipating();
     this.store.change(d => {
       d.recipients = d.recipients.filter(r => r.kind !== 'group');
       for (const g of Object.values(groups)) d.recipients.push({ jid: g.id, name: g.subject, kind: 'group' });
     });
+    if (resync) {
+      await this.socket.resyncAppState(['critical_block', 'critical_unblock_low', 'regular_high', 'regular_low', 'regular'], true);
+    }
     this.syncNote = 'Списки обновлены. Личные чаты дополняются при синхронизации и новых сообщениях.'; this.changed();
   }
   async send(r: Recipient, text: string, messageId: string): Promise<void> {
