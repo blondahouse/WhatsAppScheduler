@@ -24,7 +24,7 @@ export class Store {
     if (this.data.version !== 1 || !Array.isArray(this.data.schedules) || !Array.isArray(this.data.history)) throw new Error('Unsupported data store');
     this.change(d => {
       for (const h of d.history) if (h.result === 'sending') {
-        h.result = 'uncertain'; h.error = 'Результат не подтверждён. Автоматический повтор отключён, чтобы избежать дубля.';
+        h.result = 'uncertain'; h.error = 'The result is unconfirmed. Automatic retry is disabled to avoid a duplicate.';
         const s = d.schedules.find(s => s.id === h.scheduleId);
         if (s) { s.status = 'error'; s.error = h.error; }
       }

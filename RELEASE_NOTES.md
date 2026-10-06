@@ -1,14 +1,8 @@
-# WhatsApp Scheduler v0.1.2
+# WhatsApp Scheduler v0.1.3
 
-Исправлена синхронизация личных чатов:
+- English interface, tray menu, status labels, validation and error messages. Existing messages and schedules are preserved.
+- Recover the Baileys initial event buffer when an open connection never receives offline-batch completion. This targets the reported symptom: groups and sending work while personal-chat events remain queued.
+- Settings → Copy diagnostics: event counters and connection/buffer health without contacts, messages, session keys or automatic uploads.
+- Regression coverage: 32 core tests plus an actual Baileys event-buffer test; Windows NSIS build, installation, English UI/clipboard checks, restart/DPAPI/tray and live pre-login QR verification.
 
-- История сообщений теперь восстанавливает список личных чатов даже при пустом массиве chats.
-- Новые входящие и исходящие сообщения на телефоне автоматически добавляют личный чат.
-- Нормализация адресов связанных устройств и имена из PN/LID контактов.
-- Полная история запрашивается через совместимый WEB_BROWSER/Chrome handshake, без нативного WIN32 режима.
-- Видны отдельные счётчики личных чатов и групп, понятная инструкция при пустом списке.
-- Сессия и расписания сохраняются при обновлении.
-
-Проверки: 29 автоматических тестов, сборка NSIS, установка и UI smoke на Windows runner, настоящий QR в установленном приложении без привязки аккаунта. Реальная загрузка истории аккаунта и отправка требуют проверки с телефоном пользователя.
-
-Перед обновлением: **Выход** в tray, затем установка поверх предыдущей версии. Windows 10/11 x64; installer unsigned.
+Exit the previous app from the tray before installing the update. The existing WhatsApp session and schedules are retained. The fix is tested with queued library events; personal-chat synchronization with the user's real account still needs verification.

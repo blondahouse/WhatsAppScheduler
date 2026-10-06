@@ -51,7 +51,7 @@ export class Scheduler {
           this.store.change(d => {
             const live = d.schedules.find(x => x.id === s.id)!;
             live.status = 'error'; live.enabled = false;
-            live.error = 'Время расписания не существует в текущем часовом поясе. Измените дату и время.';
+            live.error = 'The scheduled time does not exist in the current time zone. Change the date and time.';
           });
           this.changed(); continue;
         }
@@ -77,8 +77,8 @@ export class Scheduler {
           const floorKey = localDate(floor);
           if (floorKey > live.floorDate) live.floorDate = floorKey;
           for (const day of Object.keys(live.consumed)) if (day < live.floorDate) delete live.consumed[day];
-          if (expired && s.kind === 'once') { live.enabled = false; live.status = 'error'; live.error = 'Время отправки пропущено.'; }
-          if (expired) attempt.error = 'Пропущено: задержка превышает выбранный предел.';
+          if (expired && s.kind === 'once') { live.enabled = false; live.status = 'error'; live.error = 'The send time was missed.'; }
+          if (expired) attempt.error = 'Skipped: the delay exceeds the selected limit.';
           d.history.push(attempt);
         });
         this.changed();
@@ -98,7 +98,7 @@ export class Scheduler {
         if (s) { s.error = undefined; s.status = s.kind === 'once' ? 'completed' : s.enabled ? 'active' : 'paused'; if (s.kind === 'once') s.enabled = false; }
       });
     } catch {
-      const error = 'Отправка не подтверждена. Проверьте WhatsApp. Автоматический повтор отключён, чтобы избежать дубля.';
+      const error = 'Sending is not confirmed. Check WhatsApp. Automatic retry is disabled to avoid a duplicate.';
       this.store.change(d => {
         const h = d.history.find(x => x.id === attempt.id)!; h.result = 'uncertain'; h.error = error;
         const s = d.schedules.find(x => x.id === attempt.scheduleId);
@@ -107,10 +107,10 @@ export class Scheduler {
     } finally { this.inFlight.delete(attempt.scheduleId || attempt.id); this.changed(); }
   }
   async test(recipient: Recipient, text: string): Promise<void> {
-    if (!this.connected()) throw new Error('Не удалось отправить сообщение. Нет соединения с WhatsApp.');
+    if (!this.connected()) throw new Error('Unable to send the message. No connection to WhatsApp.');
     const a: Attempt = { id: `test:${randomUUID()}`, at: Date.now(), recipient, result: 'sending' };
     this.store.change(d => { d.history.push(a); });
     await this.deliver(a, text);
-    if (this.store.data.history.find(h => h.id === a.id)?.result !== 'sent') throw new Error('Отправка не подтверждена. Проверьте WhatsApp перед повтором.');
+    if (this.store.data.history.find(h => h.id === a.id)?.result !== 'sent') throw new Error('Sending is not confirmed. Check WhatsApp before retrying.');
   }
 }

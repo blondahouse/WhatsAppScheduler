@@ -44,12 +44,12 @@ export class RecipientSync {
     if (!jid) return;
     const kind = jid.endsWith('@g.us') ? 'group' : 'personal';
     const existing = recipients.find(r => r.jid === jid);
-    const display = this.names.get(jid) || name || existing?.name || (kind === 'group' ? jid.split('@')[0] : jid.endsWith('@lid') ? `Чат ${jid.split('@')[0]}` : `+${jid.split('@')[0]}`);
+    const display = this.names.get(jid) || name || existing?.name || (kind === 'group' ? jid.split('@')[0] : jid.endsWith('@lid') ? `Chat ${jid.split('@')[0]}` : `+${jid.split('@')[0]}`);
     const recipient: Recipient = { jid, kind, name: display };
     if (!validRecipient(recipient)) return;
     if (existing) existing.name = display; else recipients.push(recipient);
   }
   note(recipients: Recipient[]): string {
-    return `Личные чаты: ${recipients.filter(r => r.kind === 'personal').length} · Группы: ${recipients.filter(r => r.kind === 'group').length}.`;
+    return `Personal chats: ${recipients.filter(r => r.kind === 'personal').length} · Groups: ${recipients.filter(r => r.kind === 'group').length}.`;
   }
 }

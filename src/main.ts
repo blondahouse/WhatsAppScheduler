@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, powerMonitor, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, powerMonitor, Notification, clipboard } from 'electron';
+import { release as osRelease } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -38,7 +39,7 @@ else {
     }, () => smoke || wa.connected, changed);
     const fatal = (e: unknown) => {
       debug(e); clearInterval(timer); wa.fatalAuth();
-      dialog.showErrorBox('WhatsApp Scheduler', 'Не удалось сохранить данные. Отправка остановлена. Проверьте свободное место и перезапустите приложение.');
+      dialog.showErrorBox('WhatsApp Scheduler', 'Unable to save data. Sending has stopped. Check available disk space and restart the app.');
     };
     process.on('uncaughtException', fatal);
     process.on('unhandledRejection', fatal);
@@ -46,10 +47,10 @@ else {
       tray.setToolTip(`WhatsApp Scheduler — ${wa.status}`);
       tray.setContextMenu(Menu.buildFromTemplate([
         { label: 'WhatsApp Scheduler', enabled: false }, { type: 'separator' },
-        { label: wa.status, enabled: false }, { label: 'Открыть', click: () => window.show() },
-        { label: 'Приостановить все расписания', enabled: !store.data.settings.paused, click: () => { store.change(d => { d.settings.paused = true; }); changed(); } },
-        { label: 'Возобновить все расписания', enabled: store.data.settings.paused, click: () => { store.change(d => { d.settings.paused = false; }); changed(); void scheduler.tick(); } },
-        { type: 'separator' }, { label: 'Выход', click: () => app.quit() }
+        { label: wa.status, enabled: false }, { label: 'Open', click: () => window.show() },
+        { label: 'Pause all schedules', enabled: !store.data.settings.paused, click: () => { store.change(d => { d.settings.paused = true; }); changed(); } },
+        { label: 'Resume all schedules', enabled: store.data.settings.paused, click: () => { store.change(d => { d.settings.paused = false; }); changed(); void scheduler.tick(); } },
+        { type: 'separator' }, { label: 'Exit', click: () => app.quit() }
       ]));
     }
     window = new BrowserWindow({ width: 1050, height: 820, minWidth: 760, minHeight: 600, title: 'WhatsApp Scheduler', backgroundColor: '#ffffff', show: false, icon: join(root, 'assets/icon.png'), webPreferences: { preload: join(root, 'dist/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
@@ -63,50 +64,54 @@ else {
       event.preventDefault(); window.hide();
       if (!store.data.settings.trayHintSeen) {
         store.change(d => { d.settings.trayHintSeen = true; });
-        new Notification({ title: 'WhatsApp Scheduler', body: 'WhatsApp Scheduler продолжает работать в области уведомлений.' }).show();
+        new Notification({ title: 'WhatsApp Scheduler', body: 'WhatsApp Scheduler keeps running in the system tray.' }).show();
       }
     });
     ipcMain.handle('scheduler', async (event, action: string, payload: any) => {
-      if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) return { ok: false, error: 'Недопустимый запрос.' };
+      if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) return { ok: false, error: 'Invalid request.' };
       try {
         if (action === 'state') return { ok: true, data: state() };
+        if (action === 'diagnostics') {
+          clipboard.writeText(JSON.stringify({ schema: 1, appVersion: app.getVersion(), platform: process.platform, osRelease: osRelease(), node: process.versions.node, electron: process.versions.electron, connection: wa.status, sync: wa.diagnostics() }, null, 2));
+          return { ok: true, data: state() };
+        }
         if (action === 'save') {
           validate(payload);
           const r = store.data.recipients.find(r => r.jid === payload.recipient.jid && r.kind === payload.recipient.kind);
-          if (!r) throw new Error('Выберите получателя из синхронизированного списка.');
+          if (!r) throw new Error('Choose a recipient from the synced list.');
           const old = payload.id ? store.data.schedules.find(s => s.id === payload.id) : undefined;
-          if (payload.id && !old) throw new Error('Расписание больше не существует.');
-          if (old && scheduler.inFlight.has(old.id)) throw new Error('Дождитесь завершения текущей отправки.');
+          if (payload.id && !old) throw new Error('This schedule no longer exists.');
+          if (old && scheduler.inFlight.has(old.id)) throw new Error('Wait for the current send to finish.');
           const now = Date.now();
           const s: Schedule = { id: old?.id || randomUUID(), recipient: r, text: payload.text, enabled: true, kind: payload.kind, once: payload.once, days: payload.days, from: payload.from, to: payload.to, interval: payload.interval, createdAt: old?.createdAt || now, updatedAt: now, notBefore: now, status: 'active', consumed: old?.consumed || {}, floorDate: old?.floorDate || '' };
           store.change(d => { d.schedules = [...d.schedules.filter(x => x.id !== s.id), s]; });
         } else if (action === 'delete' || action === 'toggle') {
           const s = store.data.schedules.find(s => s.id === payload);
-          if (!s) throw new Error('Расписание больше не существует.');
-          if (scheduler.inFlight.has(s.id)) throw new Error('Дождитесь завершения текущей отправки.');
-          if (action === 'toggle' && s.status === 'completed') throw new Error('Выполненное расписание можно изменить через «Редактировать».');
+          if (!s) throw new Error('This schedule no longer exists.');
+          if (scheduler.inFlight.has(s.id)) throw new Error('Wait for the current send to finish.');
+          if (action === 'toggle' && s.status === 'completed') throw new Error('Completed schedules can be changed using Edit.');
           store.change(d => {
             if (action === 'delete') d.schedules = d.schedules.filter(x => x.id !== payload);
             else { const live = d.schedules.find(x => x.id === payload)!; live.enabled = !live.enabled; live.status = live.enabled ? 'active' : 'paused'; live.error = undefined; live.notBefore = Date.now(); }
           });
         } else if (action === 'test') {
-          if (!validRecipient(payload?.recipient) || !store.data.recipients.some(r => r.jid === payload.recipient.jid && r.kind === payload.recipient.kind)) throw new Error('Выберите получателя.');
-          if (typeof payload.text !== 'string' || !payload.text.trim() || payload.text.length > 10000) throw new Error('Введите сообщение длиной до 10 000 символов.');
+          if (!validRecipient(payload?.recipient) || !store.data.recipients.some(r => r.jid === payload.recipient.jid && r.kind === payload.recipient.kind)) throw new Error('Choose a recipient.');
+          if (typeof payload.text !== 'string' || !payload.text.trim() || payload.text.length > 10000) throw new Error('Enter a message of up to 10,000 characters.');
           await scheduler.test(payload.recipient, payload.text);
         } else if (action === 'connect') await wa.reconnect();
         else if (action === 'refresh') await wa.refresh();
         else if (action === 'settings') {
-          if (![0, 5, 15, 30, 60].includes(payload?.grace) || typeof payload.autostart !== 'boolean' || typeof payload.paused !== 'boolean') throw new Error('Некорректные настройки.');
+          if (![0, 5, 15, 30, 60].includes(payload?.grace) || typeof payload.autostart !== 'boolean' || typeof payload.paused !== 'boolean') throw new Error('Invalid settings.');
           if (!smoke) app.setLoginItemSettings({ openAtLogin: payload.autostart, path: process.execPath, args: ['--hidden'] });
           store.change(d => { Object.assign(d.settings, { grace: payload.grace, autostart: payload.autostart, paused: payload.paused }); });
-        } else throw new Error('Недопустимый запрос.');
+        } else throw new Error('Invalid request.');
         changed(); return { ok: true, data: state() };
       } catch (e) {
         debug(e);
         const text = e instanceof Error ? e.message : '';
         // Only allow errors deliberately written for users, never dependency exceptions.
-        const safe = /^(Выберите|Введите|Одноразовая|Это время|Время «|Интервал|Дождитесь|Расписание|Выполненное|Некорректные|Недопустимый|Нет соединения|Не удалось отправить|Отправка не подтверждена)/.test(text);
-        return { ok: false, error: safe ? text : 'Не удалось выполнить действие. Проверьте соединение и повторите.' };
+        const safe = /^(Choose|Enter|One-time|This time|The end time|The interval|The message|Wait for|This schedule|Completed schedules|Invalid settings\.|Invalid request\.|No connection to WhatsApp\.|Unable to send the message\.|Sending is not confirmed)/.test(text);
+        return { ok: false, error: safe ? text : 'Unable to complete the action. Check your connection and try again.' };
       }
     });
     await window.loadFile(join(root, 'ui/index.html'));
@@ -115,13 +120,13 @@ else {
       if (!verifyingQr) app.setLoginItemSettings({ openAtLogin: store.data.settings.autostart, path: process.execPath, args: ['--hidden'] });
       void wa.connect();
     } else {
-      wa.status = 'WhatsApp подключён';
-      store.change(d => { d.recipients = [{ jid: '380501234567@s.whatsapp.net', name: 'Тестовый чат', kind: 'personal' }, { jid: '120363000000000000@g.us', name: 'Тестовая группа', kind: 'group' }]; }); changed();
+      wa.status = 'WhatsApp connected';
+      store.change(d => { d.recipients = [{ jid: '380501234567@s.whatsapp.net', name: 'Test chat', kind: 'personal' }, { jid: '120363000000000000@g.us', name: 'Test group', kind: 'group' }]; }); changed();
     }
     timer = setInterval(() => { void scheduler.tick().catch(fatal); }, 30000);
     powerMonitor.on('resume', () => { void scheduler.tick().catch(fatal); });
     void scheduler.tick().catch(fatal);
-  }).catch(e => { dialog.showErrorBox('WhatsApp Scheduler', 'Не удалось открыть локальные данные. Данные сохранены. Обратитесь к инструкции восстановления в README.'); console.error(e); app.exit(1); });
+  }).catch(e => { dialog.showErrorBox('WhatsApp Scheduler', 'Unable to open local data. Your data has been preserved. See the recovery instructions in the README.'); console.error(e); app.exit(1); });
 }
 app.on('before-quit', event => {
   if (exiting) return;

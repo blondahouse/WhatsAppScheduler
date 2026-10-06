@@ -7,18 +7,20 @@ import { join } from 'node:path';
 import { atomicWrite, Store } from './store.ts';
 import { type Recipient } from './model.ts';
 import { RecipientSync, chatJid } from './recipients.ts';
+import { recoverStalledEvents, SyncHealth } from './sync-health.ts';
 
 export class WhatsApp {
   store: Store; directory: string; changed: () => void;
   socket?: WASocket; state?: AuthenticationState;
-  status = 'Подключение…'; qr = ''; syncNote = ''; error = '';
+  status = 'Connecting…'; qr = ''; syncNote = ''; error = '';
   stopping = false; retries = 0; timer?: ReturnType<typeof setTimeout>;
   recipients = new RecipientSync(); generation = 0;
+  health = new SyncHealth(); openedAt = 0; syncTimer?: ReturnType<typeof setInterval>;
   report: (error: unknown) => void;
   auth: { creds: ReturnType<typeof initAuthCreds>; keys: Record<string, unknown> } | undefined;
   writes: Promise<void> = Promise.resolve();
   constructor(store: Store, directory: string, changed: () => void, report: (error: unknown) => void = () => {}) { this.store = store; this.directory = directory; this.changed = changed; this.report = report; }
-  get connected(): boolean { return this.status === 'WhatsApp подключён'; }
+  get connected(): boolean { return this.status === 'WhatsApp connected'; }
   async saveAuth(): Promise<void> {
     this.writes = this.writes.then(async () => {
       const plain = JSON.stringify(this.auth, BufferJSON.replacer);
@@ -30,10 +32,12 @@ export class WhatsApp {
   }
   async connect(): Promise<void> {
     if (this.stopping) return;
+    clearInterval(this.syncTimer);
+    this.health.pendingReceived = false;
     const generation = ++this.generation;
-    this.status = 'Подключение…'; this.error = ''; this.changed();
+    this.status = 'Connecting…'; this.error = ''; this.changed();
     try {
-      if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('Защищённое хранилище Windows недоступно. Перезапустите приложение.');
+      if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('Windows protected storage is unavailable. Restart the app.');
       if (!this.auth) {
         const file = join(this.directory, 'auth.enc');
         this.auth = existsSync(file)
@@ -62,7 +66,9 @@ export class WhatsApp {
         }
       };
       await this.saveAuth();
-      const socket = makeWASocket({ auth: this.state, logger: pino({ level: 'silent' }), browser: Browsers.ubuntu('Chrome'), syncFullHistory: true, markOnlineOnConnect: false, connectTimeoutMs: 30000, defaultQueryTimeoutMs: 30000 });
+      const socket = makeWASocket({ auth: this.state, logger: pino({ level: 'warn' }, { write: line => {
+        try { const entry = JSON.parse(line); this.health.warning(entry.msg); } catch { /* Never keep raw protocol logs. */ }
+      } }), browser: Browsers.ubuntu('Chrome'), syncFullHistory: true, markOnlineOnConnect: false, connectTimeoutMs: 30000, defaultQueryTimeoutMs: 30000 });
       this.socket = socket;
       const active = () => generation === this.generation && !this.stopping;
       socket.ev.on('creds.update', update => {
@@ -72,29 +78,40 @@ export class WhatsApp {
       });
       socket.ev.on('connection.update', update => {
         if (!active()) return;
+        if (update.receivedPendingNotifications) this.health.pendingReceived = true;
         void (async () => {
-          if (update.qr) { this.qr = await QRCode.toDataURL(update.qr, { width: 240, margin: 2, color: { dark: '#111111', light: '#ffffff' } }); if (!active()) return; this.status = 'Требуется повторная авторизация'; }
+          if (update.qr) { this.qr = await QRCode.toDataURL(update.qr, { width: 240, margin: 2, color: { dark: '#111111', light: '#ffffff' } }); if (!active()) return; this.status = 'Scan QR to sign in'; }
           if (update.connection === 'open') {
-            this.qr = ''; this.status = 'WhatsApp подключён'; this.retries = 0;
-            this.syncNote = 'Синхронизация чатов…'; this.changed();
-            void this.refresh(false).catch(() => { this.syncNote = 'Не удалось обновить группы. Попробуйте «Обновить списки».'; this.changed(); });
+            this.qr = ''; this.status = 'WhatsApp connected'; this.retries = 0; this.openedAt = Date.now(); this.error = '';
+            clearInterval(this.syncTimer);
+            this.syncTimer = setInterval(() => {
+              if (!active() || !this.connected) return;
+              if (recoverStalledEvents(socket.ev, this.health.pendingReceived, Date.now() - this.openedAt)) {
+                this.health.bufferRecoveries++;
+                this.syncNote = this.recipients.note(this.store.data.recipients) + ' Recovered a stalled chat sync.'; this.changed();
+              }
+            }, 30000);
+            this.syncNote = 'Syncing chats…'; this.changed();
+            void this.refresh(false).catch(() => { this.syncNote = 'Unable to refresh groups. Try Refresh lists.'; this.changed(); });
           }
           if (update.connection === 'close') {
+            clearInterval(this.syncTimer);
             ++this.generation; // Ignore late events from the disconnected socket.
             this.qr = ''; this.socket = undefined;
             const code = (update.lastDisconnect?.error as any)?.output?.statusCode;
+            this.health.lastDisconnectCode = typeof code === 'number' ? code : null;
             this.report(update.lastDisconnect?.error || new Error('WhatsApp connection closed'));
-            this.error = `Соединение с WhatsApp закрыто${code ? ` (код ${code})` : ''}. Приложение повторит подключение автоматически.`;
+            this.error = `The WhatsApp connection closed${code ? ` (code ${code})` : ''}. The app will reconnect automatically.`;
             if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession) {
               await this.writes.catch(() => {});
               rmSync(join(this.directory, 'auth.enc'), { force: true });
               this.auth = undefined; this.writes = Promise.resolve();
               this.store.change(d => { d.recipients = []; }); this.recipients.names.clear();
-              this.status = 'Требуется повторная авторизация';
-              this.syncNote = 'Сессия WhatsApp завершена. Отсканируйте QR-код снова.';
+              this.status = 'Scan QR to sign in';
+              this.syncNote = 'The WhatsApp session ended. Scan the QR code again.';
               this.scheduleReconnect(1000);
             } else {
-              this.status = 'Нет подключения';
+              this.status = 'Disconnected';
               this.scheduleReconnect(Math.min(60000, 2000 * 2 ** Math.min(this.retries++, 5)));
             }
           }
@@ -103,19 +120,23 @@ export class WhatsApp {
       });
       const updated = () => {
         this.syncNote = this.recipients.note(this.store.data.recipients);
-        if (!this.store.data.recipients.some(r => r.kind === 'personal')) this.syncNote += ' Ожидаем историю с телефона. Откройте WhatsApp на телефоне; новые личные сообщения также добавляют чат в список.';
+        if (!this.store.data.recipients.some(r => r.kind === 'personal')) this.syncNote += ' Waiting for history from your phone. Open WhatsApp on your phone; new personal messages also add chats to the list.';
         this.changed();
       };
       const contacts = (list: Parameters<RecipientSync['contacts']>[1]) => {
         if (!active()) return;
+        this.health.contactEvents++;
         this.store.change(d => this.recipients.contacts(d.recipients, list)); updated();
       };
       const chats = (list: Parameters<RecipientSync['chats']>[1]) => {
         if (!active()) return;
+        this.health.chatEvents++;
         this.store.change(d => this.recipients.chats(d.recipients, list)); updated();
       };
       socket.ev.on('messaging-history.set', history => {
         if (!active()) return;
+        this.health.historyEvents++; this.health.historyChats += history.chats.length; this.health.historyMessages += history.messages.length;
+        this.health.lastHistoryType = history.syncType ?? null; this.health.historyProgress = history.progress ?? null;
         this.store.change(d => {
           this.recipients.contacts(d.recipients, history.contacts);
           this.recipients.chats(d.recipients, history.chats);
@@ -124,6 +145,7 @@ export class WhatsApp {
       });
       socket.ev.on('messages.upsert', event => {
         if (!active()) return;
+        this.health.messageEvents++; this.health.personalMessageAddresses += event.messages.filter(m => { const jid = chatJid(m.key.remoteJid); return jid && !jid.endsWith('@g.us'); }).length;
         this.store.change(d => this.recipients.messages(d.recipients, event.messages)); updated();
       });
       socket.ev.on('contacts.upsert', contacts);
@@ -133,26 +155,27 @@ export class WhatsApp {
       socket.ev.on('chats.delete', ids => { if (active()) { this.store.change(d => { d.recipients = d.recipients.filter(r => !ids.map(chatJid).includes(r.jid)); }); this.changed(); } });
     } catch (error) {
       this.report(error);
-      this.status = 'Нет подключения'; this.error = 'Не удалось подключиться или открыть защищённую сессию. Проверьте интернет и перезапустите приложение. Данные сессии не удалены.';
+      this.status = 'Disconnected'; this.error = 'Unable to connect or open the protected session. Check your internet connection and restart the app. Your session data has been preserved.';
       this.changed(); this.scheduleReconnect(30000);
     }
   }
   fatalAuth(): void {
+    clearInterval(this.syncTimer);
     this.stopping = true; ++this.generation; this.socket?.end(new Error('Auth persistence failed'));
-    this.status = 'Нет подключения'; this.error = 'Не удалось сохранить защищённую сессию. Отправка остановлена. Проверьте свободное место и перезапустите приложение.'; this.changed();
+    this.status = 'Disconnected'; this.error = 'Unable to save the protected session. Sending has stopped. Check available disk space and restart the app.'; this.changed();
   }
   scheduleReconnect(ms: number): void {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => { void this.connect(); }, ms);
   }
   async reconnect(): Promise<void> {
-    if (this.stopping) throw new Error('Не удалось подключиться. Перезапустите приложение, чтобы открыть защищённую сессию.');
-    clearTimeout(this.timer); ++this.generation;
+    if (this.stopping) throw new Error('Unable to connect. Restart the app to open the protected session.');
+    clearTimeout(this.timer); clearInterval(this.syncTimer); ++this.generation;
     this.socket?.end(undefined); this.socket = undefined; this.qr = '';
     await this.connect();
   }
   async refresh(resync = true): Promise<void> {
-    if (!this.connected || !this.socket) throw new Error('Нет соединения с WhatsApp.');
+    if (!this.connected || !this.socket) throw new Error('No connection to WhatsApp.');
     const groups = await this.socket.groupFetchAllParticipating();
     this.store.change(d => {
       d.recipients = d.recipients.filter(r => r.kind !== 'group');
@@ -160,14 +183,19 @@ export class WhatsApp {
     });
     if (resync) {
       await this.socket.resyncAppState(['critical_block', 'critical_unblock_low', 'regular_high', 'regular_low', 'regular'], true);
+      if (recoverStalledEvents(this.socket.ev, this.health.pendingReceived, Date.now() - this.openedAt)) this.health.bufferRecoveries++;
     }
-    this.syncNote = this.recipients.note(this.store.data.recipients) + (this.store.data.recipients.some(r => r.kind === 'personal') ? ' Списки обновлены.' : ' Ожидаем историю с телефона. Откройте WhatsApp на телефоне; отправьте или получите сообщение в нужном личном чате.'); this.changed();
+    this.syncNote = this.recipients.note(this.store.data.recipients) + (this.store.data.recipients.some(r => r.kind === 'personal') ? ' Lists refreshed.' : ' Waiting for history from your phone. Open WhatsApp on your phone and send or receive a message in the personal chat.'); this.changed();
+  }
+  diagnostics() {
+    return this.health.snapshot(this.socket?.ev.isBuffering() || false, this.store.data.recipients.filter(r => r.kind === 'personal').length, this.store.data.recipients.filter(r => r.kind === 'group').length);
   }
   async send(r: Recipient, text: string, messageId: string): Promise<void> {
-    if (!this.connected || !this.socket) throw new Error('Нет соединения с WhatsApp.');
+    if (!this.connected || !this.socket) throw new Error('No connection to WhatsApp.');
     await this.socket.sendMessage(r.jid, { text }, { messageId });
   }
   async stop(): Promise<void> {
+    clearInterval(this.syncTimer);
     this.stopping = true; ++this.generation; clearTimeout(this.timer); this.socket?.end(undefined);
     await this.writes;
   }
