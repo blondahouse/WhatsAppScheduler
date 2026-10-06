@@ -124,7 +124,7 @@ else {
       void wa.connect();
     } else {
       wa.status = 'WhatsApp connected';
-      wa.socket = { logout: async () => {}, end: () => {} } as unknown as NonNullable<WhatsApp['socket']>;
+      wa.socket = { logout: async () => {}, end: () => {}, ev: { isBuffering: () => false } } as unknown as NonNullable<WhatsApp['socket']>;
       store.change(d => { d.recipients = [{ jid: '380501234567@s.whatsapp.net', name: 'Test chat', kind: 'personal' }, { jid: '120363000000000000@g.us', name: 'Test group', kind: 'group' }]; }); changed();
     }
     timer = setInterval(() => { void scheduler.tick().catch(fatal); }, 30000);
