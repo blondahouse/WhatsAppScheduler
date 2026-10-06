@@ -42,6 +42,10 @@ try {
   await page.screenshot({path:'smoke-output/schedules.png',fullPage:true});
   await page.locator('[data-tab="history"]').click();await expect(page.locator('#history-list')).toContainText('Sent');
   await page.locator('[data-tab="settings"]').click();await page.locator('#grace').selectOption('15');await page.locator('#autostart').uncheck();await page.locator('#save-settings').click();
+  await page.locator('#refresh').click();
+  await expect(page.locator('#feedback')).toContainText('Groups fetched: 1');
+  await expect(page.locator('#feedback')).toContainText('Labels added or changed: 0');
+  await expect(page.locator('#feedback')).toContainText('Contact snapshot received');
   await page.locator('#copy-diagnostics').click();
   await expect(page.locator('#feedback')).toContainText('Diagnostics copied');
   const report=await app.evaluate(async({clipboard})=>JSON.parse(await clipboard.readText()));

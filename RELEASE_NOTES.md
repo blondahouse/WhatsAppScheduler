@@ -1,10 +1,10 @@
-# WhatsApp Scheduler v0.1.4
+# WhatsApp Scheduler v0.1.5
 
-- Personal chat names use saved contact name, chat title, verified business name, profile name, then incoming message name, in that order.
-- Blank or technical names cannot overwrite readable names. Name sources and explicit phone/LID aliases persist across restarts.
-- Unknown LID chats use a short “Unnamed chat” label instead of a misleading phone number. Actual phone numbers are used when WhatsApp supplies a mapping.
-- Schedule cards show the current synced recipient name without changing their sending address.
-- Settings → Sign out of WhatsApp unlinks this device, clears the local encrypted session and recipient cache, and pauses all schedules. Schedules and send history are retained.
-- Sign out requires confirmation. Signing in again requires an explicit Connect WhatsApp action; resume schedules manually after checking the connected account.
+- Refresh lists now fetches current groups and forces a complete contact snapshot, instead of only requesting deltas from the existing cursor.
+- Only the contact collection cursor is reset, under Baileys’ app-state processing mutex. Session, Signal keys, schedules and send history are retained.
+- Group member metadata, history chat aliases and group sender profile names enrich existing personal chats without adding non-chat contacts to the dropdown.
+- Refresh resolves phone-to-LID aliases using known phone numbers in bounded batches. Anonymous IDs are never treated as phone numbers; no messages are sent.
+- Known full phone numbers appear when no human name is available. Unknown LIDs still show an unnamed label if WhatsApp supplies no mapping.
+- The UI shows refresh progress, actual labels added/changed, and counts of named, phone-only and unresolved personal chats. Snapshot failures are disclosed instead of unconditional “Lists refreshed”.
 
-The interface is in English. Windows build verification covers simulated logout, name priority, persistence, installed UI and real unauthenticated QR acquisition. Real account logout and account-specific name sync require verification with the user's phone.
+Tests cover snapshot reset scope and mutex, unavailable snapshots, disconnected sockets, report counts, group/phone aliases, history aliases and group profile names. The installed Windows UI and unauthenticated real QR acquisition are verified in CI. Account-specific contact snapshots and phone lookup results require verification with the user’s linked WhatsApp account.

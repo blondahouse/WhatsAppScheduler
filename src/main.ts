@@ -30,7 +30,7 @@ else {
       } catch { /* Do not reveal errors in UI. */ }
     };
     store = new Store(join(dataDir, 'state.json'));
-    const state = () => ({ schedules: store.data.schedules, recipients: store.data.recipients, history: [...store.data.history].reverse(), settings: store.data.settings, connection: wa.status, qr: wa.qr, syncNote: wa.syncNote, connectionError: wa.error, version: app.getVersion() });
+    const state = () => ({ schedules: store.data.schedules, recipients: store.data.recipients, history: [...store.data.history].reverse(), settings: store.data.settings, connection: wa.status, qr: wa.qr, syncNote: wa.syncNote, connectionError: wa.error, refreshing: wa.refreshing, refreshResult: wa.refreshResult, version: app.getVersion() });
     const changed = () => { if (window && !window.isDestroyed()) window.webContents.send('state', state()); if (tray) updateTray(); };
     wa = new WhatsApp(store, dataDir, changed, debug);
     scheduler = new Scheduler(store, async (r, text, id) => {
@@ -124,7 +124,7 @@ else {
       void wa.connect();
     } else {
       wa.status = 'WhatsApp connected';
-      wa.socket = { logout: async () => {}, end: () => {}, ev: { isBuffering: () => false } } as unknown as NonNullable<WhatsApp['socket']>;
+      wa.socket = { logout: async () => {}, end: () => {}, ev: { isBuffering: () => false }, groupFetchAllParticipating: async () => ({ test: { id: '120363000000000000@g.us', subject: 'Test group', participants: [] } }), processingMutex: { mutex: async (work: () => Promise<unknown>) => work() }, authState: { keys: { set: async () => {}, get: async () => ({ critical_unblock_low: { version: 1 } }) } }, resyncAppState: async () => {}, onWhatsApp: async () => [] } as unknown as NonNullable<WhatsApp['socket']>;
       store.change(d => { d.recipients = [{ jid: '380501234567@s.whatsapp.net', name: 'Test chat', kind: 'personal' }, { jid: '120363000000000000@g.us', name: 'Test group', kind: 'group' }]; }); changed();
     }
     timer = setInterval(() => { void scheduler.tick().catch(fatal); }, 30000);

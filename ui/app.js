@@ -30,7 +30,8 @@ function render(next) {
   $('app-version').textContent = state.version ? `v${state.version}` : '';
   $('connection-error').hidden = !state.connectionError; $('connection-error').textContent = state.connectionError;
   $('sync-note').textContent = state.syncNote || 'Your chats will appear after connecting.';
-  $('refresh').disabled = state.connection !== 'WhatsApp connected';
+  $('refresh').disabled = state.connection !== 'WhatsApp connected' || !!state.refreshing;
+  $('refresh').textContent = state.refreshing ? 'Refreshing…' : 'Refresh lists';
   $('paused').hidden = !state.settings.paused;
   $('autostart').checked = state.settings.autostart; $('global-paused').checked = state.settings.paused; $('grace').value = String(state.settings.grace);
   const list = $('schedule-list'); list.replaceChildren();
@@ -99,7 +100,7 @@ for(const input of document.querySelectorAll('input[name="recipient-kind"]')) in
 for(const id of ['close-editor','cancel']) $(id).addEventListener('click',()=> { if(!formBusy) $('editor').close(); });
 $('editor').addEventListener('cancel',event=> { if(formBusy) event.preventDefault(); });
 $('reconnect').addEventListener('click',()=>action(async()=>{ $('reconnect').disabled=true; try { await call('connect'); } finally { $('reconnect').disabled=false; } }));
-$('refresh').addEventListener('click',()=>action(async()=>{ $('refresh').disabled=true; try { await call('refresh'); notice('Lists refreshed.'); } finally { $('refresh').disabled=state.connection !== 'WhatsApp connected'; } }));
+$('refresh').addEventListener('click',()=>action(async()=>{ $('refresh').disabled=true; try { await call('refresh'); notice(state.refreshResult || 'The refresh request finished.'); } finally { $('refresh').disabled=state.connection !== 'WhatsApp connected' || !!state.refreshing; } }));
 $('save-settings').addEventListener('click',()=>action(async()=>{ await call('settings',{grace:Number($('grace').value),autostart:$('autostart').checked,paused:$('global-paused').checked});notice('Settings saved.'); }));
 async function formAction(fn) {
   if(formBusy) return;

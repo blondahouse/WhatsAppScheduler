@@ -1,8 +1,8 @@
 import { type Recipient, type RecipientMetadata, validRecipient } from './model.ts';
 
 type Contact = { id?: string; jid?: string; lid?: string; name?: string | null; notify?: string | null; verifiedName?: string | null };
-type Chat = { id?: string; name?: string | null };
-type Message = { key?: { remoteJid?: string | null; remoteJidAlt?: string | null; fromMe?: boolean | null }; pushName?: string | null; message?: unknown; messageStubType?: number | null };
+type Chat = { id?: string; name?: string | null; lidJid?: string | null; pnJid?: string | null };
+type Message = { key?: { remoteJid?: string | null; remoteJidAlt?: string | null; participant?: string | null; participantAlt?: string | null; fromMe?: boolean | null }; pushName?: string | null; message?: unknown; messageStubType?: number | null };
 const priority = ['contact', 'chat', 'business', 'profile', 'push', 'legacy'] as const;
 
 export function chatJid(id: unknown): string | undefined {
@@ -41,7 +41,7 @@ export class RecipientSync {
     }
     const legacy = clean(previous);
     if (legacy && !legacy.startsWith('Unnamed chat ·')) return legacy;
-    const phone = [jid, ...ids].find(id => id.endsWith('@s.whatsapp.net'));
+    const phone = [jid, ...ids].find(id => /^[1-9]\d*@s\.whatsapp\.net$/.test(id));
     if (phone) return `+${phone.split('@')[0]}`;
     return jid.endsWith('@g.us') ? jid.split('@')[0] : `Unnamed chat · …${jid.split('@')[0].slice(-4)}`;
   }
@@ -62,12 +62,25 @@ export class RecipientSync {
     this.update(recipients);
   }
   chats(recipients: Recipient[], chats: Chat[]): void {
-    for (const c of chats) this.add(recipients, c.id, c.name);
+    for (const c of chats) {
+      const ids = [c.id, c.lidJid, c.pnJid].map(chatJid).filter((id): id is string => !!id && !id.endsWith('@g.us'));
+      this.link(ids);
+      this.add(recipients, c.id, c.name);
+    }
+    this.update(recipients);
   }
   messages(recipients: Recipient[], messages: Message[]): void {
     for (const m of messages) {
       const jid = chatJid(m.key?.remoteJid);
-      if (!jid || jid.endsWith('@g.us') || (!m.message && m.messageStubType == null)) continue;
+      if (!jid || (!m.message && m.messageStubType == null)) continue;
+      if (jid.endsWith('@g.us')) {
+        const sender = chatJid(m.key?.participant), alt = chatJid(m.key?.participantAlt);
+        if (sender && !sender.endsWith('@g.us') && !m.key?.fromMe) {
+          if (alt && !alt.endsWith('@g.us')) this.link([sender, alt]);
+          this.remember(sender, 'push', m.pushName);
+        }
+        continue;
+      }
       if (m.message && typeof m.message === 'object' && 'protocolMessage' in m.message && Object.keys(m.message).every(k => k === 'protocolMessage' || k === 'messageContextInfo')) continue;
       const alt = chatJid(m.key?.remoteJidAlt);
       if (alt && !alt.endsWith('@g.us')) this.link([jid, alt]);
@@ -85,6 +98,9 @@ export class RecipientSync {
     const recipient: Recipient = { jid, kind, name: this.display(jid, existing?.name) };
     if (!validRecipient(recipient)) return;
     if (existing) existing.name = recipient.name; else recipients.push(recipient);
+  }
+  phoneCandidates(recipients: Recipient[]): string[] {
+    return [...new Set([...Object.keys(this.metadata), ...recipients.map(r => r.jid)])].filter(jid => /^[1-9]\d{6,14}@s\.whatsapp\.net$/.test(jid));
   }
   note(recipients: Recipient[]): string {
     return `Personal chats: ${recipients.filter(r => r.kind === 'personal').length} · Groups: ${recipients.filter(r => r.kind === 'group').length}.`;

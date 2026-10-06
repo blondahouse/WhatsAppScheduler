@@ -101,3 +101,34 @@ test('name sources and aliases persist across restart and remain higher priority
     assert.deepEqual(resumed.metadata, {});
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('group participant metadata supplies phone fallback and names without adding group members as chats', () => {
+  const sync = new RecipientSync(), recipients: Recipient[] = [];
+  sync.chats(recipients, [{ id: '123@lid' }]);
+  sync.contacts(recipients, [{ id: '123@lid', jid: '380123456789@s.whatsapp.net' }, { id: '999@lid', jid: '380999999999@s.whatsapp.net', name: 'Not a chat' }]);
+  assert.deepEqual(recipients, [{ jid: '123@lid', name: '+380123456789', kind: 'personal' }]);
+  sync.contacts(recipients, [{ id: '380123456789@s.whatsapp.net', name: 'Saved name' }]);
+  assert.equal(recipients[0].name, 'Saved name');
+});
+
+test('history chat phone/LID fields resolve already synced contacts', () => {
+  const sync = new RecipientSync(), recipients: Recipient[] = [];
+  sync.contacts(recipients, [{ id: '380123456789@s.whatsapp.net', name: 'Saved name' }]);
+  sync.chats(recipients, [{ id: '123@lid', pnJid: '380123456789@s.whatsapp.net' }]);
+  assert.equal(recipients[0].name, 'Saved name');
+});
+
+test('group message profile names enrich existing personal chats but do not create new conversations', () => {
+  const sync = new RecipientSync(), recipients: Recipient[] = [];
+  sync.chats(recipients, [{ id: '123@lid' }]);
+  sync.messages(recipients, [{ key: { remoteJid: '456@g.us', participant: '123@lid', participantAlt: '380123456789@s.whatsapp.net' }, pushName: 'Group sender', message: { conversation: 'Hi' } }]);
+  assert.deepEqual(recipients, [{ jid: '123@lid', name: 'Group sender', kind: 'personal' }]);
+});
+
+test('mapping candidates contain real known phones and never anonymous LID digits or system zero', () => {
+  const sync = new RecipientSync(), recipients: Recipient[] = [];
+  sync.contacts(recipients, [{ id: '987654321012345@lid' }, { id: '380123456789@s.whatsapp.net' }, { id: '0@s.whatsapp.net' }]);
+  assert.deepEqual(sync.phoneCandidates(recipients), ['380123456789@s.whatsapp.net']);
+  sync.chats(recipients, [{ id: '0@s.whatsapp.net' }]);
+  assert.match(recipients[0].name, /^Unnamed chat/);
+});

@@ -7,12 +7,14 @@ import { join } from 'node:path';
 import { atomicWrite, Store } from './store.ts';
 import { type Recipient } from './model.ts';
 import { RecipientSync, chatJid } from './recipients.ts';
+import { forceContactSnapshot, recipientCounts, refreshSummary } from './contact-refresh.ts';
 import { recoverStalledEvents, SyncHealth } from './sync-health.ts';
 
 export class WhatsApp {
   store: Store; directory: string; changed: () => void;
   socket?: WASocket; state?: AuthenticationState;
   status = 'Connecting…'; qr = ''; syncNote = ''; error = '';
+  refreshing = false; refreshResult = '';
   stopping = false; retries = 0; timer?: ReturnType<typeof setTimeout>;
   recipients = new RecipientSync(); generation = 0;
   health = new SyncHealth(); openedAt = 0; syncTimer?: ReturnType<typeof setInterval>;
@@ -119,7 +121,7 @@ export class WhatsApp {
         })().catch(() => this.fatalAuth());
       });
       const updated = () => {
-        this.syncNote = this.recipients.note(this.store.data.recipients);
+        if (!this.refreshing) this.syncNote = this.recipients.note(this.store.data.recipients);
         if (!this.store.data.recipients.some(r => r.kind === 'personal')) this.syncNote += ' Waiting for history from your phone. Open WhatsApp on your phone; new personal messages also add chats to the list.';
         this.changed();
       };
@@ -206,22 +208,55 @@ export class WhatsApp {
   }
   async refresh(resync = true): Promise<void> {
     if (!this.connected || !this.socket) throw new Error('No connection to WhatsApp.');
+    if (this.refreshing) throw new Error('Wait for the current refresh to finish.');
     const socket = this.socket, generation = this.generation;
-    const groups = await socket.groupFetchAllParticipating();
-    if (generation !== this.generation || socket !== this.socket) return;
-    this.store.change(d => {
-      d.recipients = d.recipients.filter(r => r.kind !== 'group');
-      for (const g of Object.values(groups)) d.recipients.push({ jid: g.id, name: g.subject, kind: 'group' });
-    });
-    if (resync) {
-      await socket.resyncAppState(['critical_block', 'critical_unblock_low', 'regular_high', 'regular_low', 'regular'], true);
-      if (generation !== this.generation || socket !== this.socket) return;
+    const active = () => generation === this.generation && socket === this.socket && this.connected;
+    const before = new Map(this.store.data.recipients.map(r => [r.jid, r.name]));
+    this.refreshing = true; this.refreshResult = ''; this.syncNote = 'Fetching groups and contact names…'; this.changed();
+    try {
+      const groups = await socket.groupFetchAllParticipating();
+      if (!active()) return;
+      this.store.change(d => {
+        d.recipients = d.recipients.filter(r => r.kind !== 'group');
+        for (const g of Object.values(groups)) {
+          d.recipients.push({ jid: g.id, name: g.subject, kind: 'group' });
+          // Group members supply explicit phone/LID pairs. Never create
+          // personal chats merely because someone belongs to a group.
+          this.recipients.contacts(d.recipients, g.participants || []);
+        }
+        d.recipientMetadata = structuredClone(this.recipients.metadata);
+      });
+      if (!resync) { this.syncNote = this.recipients.note(this.store.data.recipients); return; }
+      let snapshot = false, lookupFailed = false;
+      this.syncNote = 'Requesting a full contact snapshot…'; this.changed();
+      try { snapshot = await forceContactSnapshot(socket, active); }
+      catch (error) { this.report(error); }
+      if (!active()) return;
       if (recoverStalledEvents(socket.ev, this.health.pendingReceived, Date.now() - this.openedAt)) this.health.bufferRecoveries++;
-    }
-    this.syncNote = this.recipients.note(this.store.data.recipients) + (this.store.data.recipients.some(r => r.kind === 'personal') ? ' Lists refreshed.' : ' Waiting for history from your phone. Open WhatsApp on your phone and send or receive a message in the personal chat.'); this.changed();
+      // This lookup takes real phone numbers, NEVER anonymous LID digits.
+      // It can connect phonebook names to LID chats without sending messages.
+      if (recipientCounts(this.store.data.recipients).unresolved) {
+        const phones = this.recipients.phoneCandidates(this.store.data.recipients).slice(0, 1000);
+        for (let offset = 0; offset < phones.length; offset += 50) {
+          if (!active()) return;
+          this.syncNote = `Resolving known phone numbers: ${Math.min(offset + 50, phones.length)}/${phones.length}…`; this.changed();
+          try {
+            const mappings = await socket.onWhatsApp(...phones.slice(offset, offset + 50));
+            if (!active()) return;
+            this.store.change(d => {
+              this.recipients.contacts(d.recipients, mappings || []);
+              d.recipientMetadata = structuredClone(this.recipients.metadata);
+            });
+          } catch (error) { this.report(error); lookupFailed = true; break; }
+        }
+      }
+      if (!active()) return;
+      this.refreshResult = refreshSummary(before, this.store.data.recipients, Object.keys(groups).length, snapshot, lookupFailed);
+      this.syncNote = this.refreshResult;
+    } finally { this.refreshing = false; this.changed(); }
   }
   diagnostics() {
-    return this.health.snapshot(this.socket?.ev.isBuffering() || false, this.store.data.recipients.filter(r => r.kind === 'personal').length, this.store.data.recipients.filter(r => r.kind === 'group').length);
+    return { ...this.health.snapshot(this.socket?.ev.isBuffering() || false, this.store.data.recipients.filter(r => r.kind === 'personal').length, this.store.data.recipients.filter(r => r.kind === 'group').length), names: recipientCounts(this.store.data.recipients), refreshing: this.refreshing }; 
   }
   async send(r: Recipient, text: string, messageId: string): Promise<void> {
     if (!this.connected || !this.socket) throw new Error('No connection to WhatsApp.');
