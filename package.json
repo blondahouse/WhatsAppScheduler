@@ -16,25 +16,44 @@
   },
   "dependencies": {
     "@whiskeysockets/baileys": "6.7.24",
-    "pino": "latest",
-    "qrcode": "latest"
+    "pino": "10.4.0",
+    "qrcode": "1.5.4"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "@types/qrcode": "latest",
-    "electron": "latest",
-    "electron-builder": "latest",
-    "esbuild": "latest",
-    "typescript": "latest",
-    "@playwright/test": "latest"
+    "@types/node": "26.6.4",
+    "@types/qrcode": "1.5.6",
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "@playwright/test": "1.63.0"
   },
   "build": {
     "appId": "house.blonda.whatsapp-scheduler",
     "productName": "WhatsApp Scheduler",
-    "directories": { "output": "release", "buildResources": "assets" },
-    "files": ["dist/**/*", "ui/**/*", "assets/**/*", "package.json"],
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "ui/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
     "asar": true,
-    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "assets/icon.ico", "signAndEditExecutable": false },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": false
+    },
     "nsis": {
       "artifactName": "WhatsAppScheduler-Setup-x64.exe",
       "oneClick": false,
