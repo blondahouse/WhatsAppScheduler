@@ -19,7 +19,7 @@ export class WhatsApp {
   report: (error: unknown) => void;
   auth: { creds: ReturnType<typeof initAuthCreds>; keys: Record<string, unknown> } | undefined;
   writes: Promise<void> = Promise.resolve();
-  constructor(store: Store, directory: string, changed: () => void, report: (error: unknown) => void = () => {}) { this.store = store; this.directory = directory; this.changed = changed; this.report = report; this.recipients = new RecipientSync(store.data.recipientMetadata); }
+  constructor(store: Store, directory: string, changed: () => void, report: (error: unknown) => void = () => {}) { this.store = store; this.directory = directory; this.changed = changed; this.report = report; this.recipients = new RecipientSync(store.data.recipientMetadata); store.change(d => this.recipients.contacts(d.recipients, [])); }
   get connected(): boolean { return this.status === 'WhatsApp connected'; }
   async saveAuth(): Promise<void> {
     this.writes = this.writes.then(async () => {
@@ -149,6 +149,7 @@ export class WhatsApp {
         this.health.messageEvents++; this.health.personalMessageAddresses += event.messages.filter(m => { const jid = chatJid(m.key.remoteJid); return jid && !jid.endsWith('@g.us'); }).length;
         this.store.change(d => { this.recipients.messages(d.recipients, event.messages); d.recipientMetadata = this.recipients.metadata; }); updated();
       });
+      socket.ev.on('chats.phoneNumberShare', mapping => contacts([mapping]));
       socket.ev.on('contacts.upsert', contacts);
       socket.ev.on('contacts.update', contacts);
       socket.ev.on('chats.upsert', chats);
