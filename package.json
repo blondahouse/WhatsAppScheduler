@@ -52,7 +52,7 @@
         }
       ],
       "icon": "assets/icon.ico",
-      "signAndEditExecutable": false
+      "signExecutable": false
     },
     "nsis": {
       "artifactName": "WhatsAppScheduler-Setup-x64.exe",

@@ -43,6 +43,8 @@ jobs:
       - name: Verify installed app and renderer
         shell: pwsh
         run: |
+          $sig = Get-AuthenticodeSignature "release/WhatsAppScheduler-Setup-x64.exe"
+          if ($sig.Status -ne 'NotSigned') { throw "Expected unsigned installer, got $($sig.Status)" }
           $dest = Join-Path $env:RUNNER_TEMP "WhatsAppScheduler-installed"
           $p = Start-Process "release/WhatsAppScheduler-Setup-x64.exe" -ArgumentList @("/S", "/D=$dest") -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-contextBridge.exposeInMainWorld('scheduler', {
+contextBridge.exposeInMainWorld('waScheduler', {
   call: (action: string, payload?: unknown) => ipcRenderer.invoke('scheduler', action, payload),
   subscribe: (callback: (state: unknown) => void) => {
     const listener = (_: unknown, state: unknown) => callback(state);

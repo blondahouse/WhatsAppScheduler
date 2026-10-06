@@ -45,7 +45,16 @@ export class Scheduler {
       for (const snapshot of [...this.store.data.schedules]) {
         const s = this.store.data.schedules.find(x => x.id === snapshot.id);
         if (!s || !s.enabled || s.status === 'completed') continue;
-        const slot = latestDue(s, now);
+        let slot: Slot | undefined;
+        try { slot = latestDue(s, now); }
+        catch {
+          this.store.change(d => {
+            const live = d.schedules.find(x => x.id === s.id)!;
+            live.status = 'error'; live.enabled = false;
+            live.error = 'Время расписания не существует в текущем часовом поясе. Измените дату и время.';
+          });
+          this.changed(); continue;
+        }
         if (!slot || consumed(s, slot)) continue;
         const grace = this.store.data.settings.grace;
         // "No missed" still accepts the normal 30-second loop within the intended minute.

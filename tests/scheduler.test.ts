@@ -118,3 +118,7 @@ test('DST nonexistent wall time is rejected; repeated minute creates one slot',(
   execFileSync(process.execPath,['--input-type=module','-e',code],{env:{...process.env,TZ:'America/New_York'}});
 });
 test('latest due respects creation and edit time',()=>assert.equal(latestDue(schedule({notBefore:at(8,29)}),at(8,29)),undefined));
+test('timezone change making one-time wall time nonexistent disables only that schedule',async()=> {
+  const code=`import {Store} from ${JSON.stringify(new URL('../src/store.ts',import.meta.url).href)};import {Scheduler} from ${JSON.stringify(new URL('../src/scheduler.ts',import.meta.url).href)};const store=new Store(process.argv[1]);store.change(d=>{d.schedules[0].kind='once';d.schedules[0].once='2026-03-08T02:30'});await new Scheduler(store,async()=>{throw new Error('must not send')},()=>true).tick(Date.now());if(store.data.schedules[0].enabled||store.data.schedules[0].status!=='error')process.exit(1);`;
+  const f=fixture();try{execFileSync(process.execPath,['--input-type=module','-e',code,f.path],{env:{...process.env,TZ:'America/New_York'}});}finally{f.dispose();}
+});

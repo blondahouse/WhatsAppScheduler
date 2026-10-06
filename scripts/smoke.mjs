@@ -8,7 +8,8 @@ const errors=[];
 const launch=()=>electron.launch({executablePath:process.env.APP_EXE,args:process.env.APP_EXE?[]:['.'],env:{...process.env,WASCHEDULER_SMOKE:'1',WASCHEDULER_DATA:data},timeout:60000});
 let app=await launch();
 try {
-  let page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));
+  let page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));page.on('console',msg=>{if(msg.type()==='error') console.log('Renderer error:',msg.text());});
+  console.log('Preload API available:',await page.evaluate(()=>typeof window.waScheduler?.call));
   await expect(page.locator('#connection')).toHaveText('WhatsApp подключён');
   await expect(page.locator('.empty')).toContainText('Пока нет расписаний');
   await page.locator('#new').click();
@@ -43,4 +44,4 @@ try {
   expect(stored.schedules[0].text).toBe('Доброе утро\n🙂');
   expect(errors).toEqual([]);
   console.log('Installed Windows app: renderer CRUD, validation, personal/group separation, test-send mock, Unicode, settings, DPAPI roundtrip, tray close, restart persistence passed. WhatsApp network not mocked as verified.');
-} finally { await app.close(); }
+} catch(e) { const windows=app.windows();if(windows.length) await windows[0].screenshot({path:'smoke-output/failure.png'}).catch(()=>{});console.log('Smoke failure:',e.message);console.log('Renderer errors:',errors);throw e; } finally { await app.close(); }

@@ -7,7 +7,7 @@ function element(tag, text, cls) { const e = document.createElement(tag); if (te
 function recipientText(r) { return `${r.kind === 'group' ? 'Группа' : 'Личный чат'} · ${r.name}`; }
 function notice(text, error = false) { $('feedback').textContent = text; $('feedback').className = error ? 'error' : 'success'; $('feedback').hidden = false; }
 async function call(action, payload) {
-  const response = await window.scheduler.call(action, payload);
+  const response = await window.waScheduler.call(action, payload);
   if (!response.ok) throw new Error(response.error);
   if (response.data) render(response.data);
   return response;
@@ -91,5 +91,5 @@ async function formAction(fn) {
 }
 $('test').addEventListener('click',()=>formAction(async()=> { const p=payload(); await call('test',{recipient:p.recipient,text:p.text}); $('test-result').textContent='Тестовое сообщение отправлено.'; $('test-result').className='success'; $('test-result').hidden=false; }));
 $('schedule-form').addEventListener('submit',event=> {event.preventDefault();void formAction(async()=> { await call('save',payload());$('editor').close();notice('Расписание сохранено.'); });});
-window.scheduler.subscribe(render);
+window.waScheduler.subscribe(render);
 void action(()=>call('state'));
