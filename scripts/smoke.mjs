@@ -11,7 +11,7 @@ try {
   let page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));page.on('console',msg=>{if(msg.type()==='error') console.log('Renderer error:',msg.text());});
   console.log('Preload API available:',await page.evaluate(()=>typeof window.waScheduler?.call));
   await expect(page.locator('#connection')).toHaveText('WhatsApp подключён');
-  await expect(page.locator('.empty')).toContainText('Пока нет расписаний');
+  await expect(page.locator('#schedule-list .empty')).toContainText('Пока нет расписаний');
   await page.locator('#new').click();
   await page.locator('#save').click();await expect(page.locator('#form-error')).toContainText('Выберите получателя');
   await page.locator('#recipient').selectOption('380501234567@s.whatsapp.net');
@@ -24,9 +24,19 @@ try {
   await expect(page.locator('.card')).toContainText('08:00–08:00');
   await page.locator('.card button').filter({hasText:'Редактировать'}).click();
   await page.locator('#to').fill('07:00');await page.locator('#save').click();await expect(page.locator('#form-error')).toContainText('не может быть раньше');
-  await page.locator('#cancel').click();
+  await page.locator('#to').fill('08:00');
+  await page.locator('#message').fill('Доброе утро\n🙂 — изменено');
+  await page.locator('#save').click();await expect(page.locator('.card')).toContainText('изменено');
+  await page.locator('.toggle-label input').uncheck();await expect(page.locator('.card')).toContainText('Приостановлено');
+  await page.locator('.toggle-label input').check();await expect(page.locator('.card')).toContainText('Активно');
   await page.locator('#new').click();await page.locator('input[name="recipient-kind"][value="group"]').check();
   await expect(page.locator('#recipient option')).toHaveCount(2);
+  await page.locator('#recipient').selectOption('120363000000000000@g.us');await page.locator('#message').fill('Группа: тест');
+  await page.locator('#save').click();await expect(page.locator('.card')).toHaveCount(2);
+  page.once('dialog',dialog=>dialog.accept());
+  await page.locator('.card').nth(1).getByRole('button',{name:'Удалить',exact:true}).click();
+  await expect(page.locator('.card')).toHaveCount(1);
+  await page.locator('#new').click();await page.locator('input[name="recipient-kind"][value="group"]').check();
   await page.locator('#recipient').selectOption('120363000000000000@g.us');await page.locator('#message').fill('Группа: тест');
   await page.locator('#save').click();await expect(page.locator('.card')).toHaveCount(2);
   await page.screenshot({path:'smoke-output/schedules.png',fullPage:true});
@@ -41,7 +51,7 @@ try {
   await expect(page.locator('.card')).toHaveCount(2);
   await page.locator('[data-tab="settings"]').click();await expect(page.locator('#grace')).toHaveValue('15');await expect(page.locator('#autostart')).not.toBeChecked();
   const stored=JSON.parse(readFileSync(join(data,'state.json'),'utf8'));
-  expect(stored.schedules[0].text).toBe('Доброе утро\n🙂');
+  expect(stored.schedules[0].text).toBe('Доброе утро\n🙂 — изменено');
   expect(errors).toEqual([]);
   console.log('Installed Windows app: renderer CRUD, validation, personal/group separation, test-send mock, Unicode, settings, DPAPI roundtrip, tray close, restart persistence passed. WhatsApp network not mocked as verified.');
 } catch(e) { const windows=app.windows();if(windows.length) await windows[0].screenshot({path:'smoke-output/failure.png'}).catch(()=>{});console.log('Smoke failure:',e.message);console.log('Renderer errors:',errors);throw e; } finally { await app.close(); }

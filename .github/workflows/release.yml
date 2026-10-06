@@ -61,6 +61,11 @@ jobs:
             release/*.sha256
             smoke-output/*
             package-lock.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-screenshots
+          path: smoke-output/*.png
       - name: Publish versioned release
         shell: pwsh
         env:
