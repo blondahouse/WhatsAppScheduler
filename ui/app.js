@@ -26,6 +26,7 @@ function render(next) {
   $('qr-pending').textContent = state.connection === 'Disconnected' ? 'The QR code will appear when WhatsApp is reachable.' : 'Requesting QR code…';
   if (state.qr) $('qr').src = state.qr;
   $('reconnect').hidden = state.connection === 'WhatsApp connected';
+  $('reconnect').disabled = state.connection === 'Signing out…';
   $('app-version').textContent = state.version ? `v${state.version}` : '';
   $('connection-error').hidden = !state.connectionError; $('connection-error').textContent = state.connectionError;
   $('sync-note').textContent = state.syncNote || 'Your chats will appear after connecting.';

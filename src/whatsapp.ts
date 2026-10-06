@@ -198,6 +198,7 @@ export class WhatsApp {
     this.error = ''; this.changed();
   }
   async reconnect(): Promise<void> {
+    if (this.status === 'Signing out…') throw new Error('Wait for sign out to finish.');
     if (this.stopping) throw new Error('Unable to connect. Restart the app to open the protected session.');
     clearTimeout(this.timer); clearInterval(this.syncTimer); ++this.generation;
     this.socket?.end(undefined); this.socket = undefined; this.qr = '';
