@@ -72,7 +72,7 @@ else {
       try {
         if (action === 'state') return { ok: true, data: state() };
         if (action === 'diagnostics') {
-          clipboard.writeText(JSON.stringify({ schema: 1, appVersion: app.getVersion(), platform: process.platform, osRelease: osRelease(), node: process.versions.node, electron: process.versions.electron, connection: wa.status, sync: wa.diagnostics() }, null, 2));
+          await clipboard.writeText(JSON.stringify({ schema: 1, appVersion: app.getVersion(), platform: process.platform, osRelease: osRelease(), node: process.versions.node, electron: process.versions.electron, connection: wa.status, sync: wa.diagnostics() }, null, 2));
           return { ok: true, data: state() };
         }
         if (action === 'save') {

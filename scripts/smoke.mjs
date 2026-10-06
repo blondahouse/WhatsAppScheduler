@@ -44,7 +44,7 @@ try {
   await page.locator('[data-tab="settings"]').click();await page.locator('#grace').selectOption('15');await page.locator('#autostart').uncheck();await page.locator('#save-settings').click();
   await page.locator('#copy-diagnostics').click();
   await expect(page.locator('#feedback')).toContainText('Diagnostics copied');
-  const report=await app.evaluate(({clipboard})=>JSON.parse(clipboard.readText()));
+  const report=await app.evaluate(async({clipboard})=>JSON.parse(await clipboard.readText()));
   expect(report.platform).toBe('win32');expect(report.connection).toBe('WhatsApp connected');expect(report.sync.personalChats).toBe(1);expect(report.sync.groups).toBe(1);
   expect(JSON.stringify(report)).not.toContain('380501234567');expect(JSON.stringify(report)).not.toContain('Доброе утро');expect(JSON.stringify(report)).not.toContain('auth');
   const secured=await app.evaluate(async({safeStorage})=>{const plain='sensitive-fixture';const cipher=await safeStorage.encryptStringAsync(plain);const restored=await safeStorage.decryptStringAsync(cipher);return {matches:restored.result===plain,encrypted:!cipher.includes(Buffer.from(plain))};});
