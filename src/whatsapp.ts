@@ -244,7 +244,7 @@ export class WhatsApp {
             const mappings = await socket.onWhatsApp(...phones.slice(offset, offset + 50));
             if (!active()) return;
             this.store.change(d => {
-              this.recipients.contacts(d.recipients, mappings || []);
+              this.recipients.contacts(d.recipients, (mappings || []).map(mapping => ({ jid: chatJid(mapping.jid), lid: chatJid(mapping.lid) })));
               d.recipientMetadata = structuredClone(this.recipients.metadata);
             });
           } catch (error) { this.report(error); lookupFailed = true; break; }
