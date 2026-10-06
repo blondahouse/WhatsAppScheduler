@@ -29,7 +29,7 @@ else {
       } catch { /* Do not reveal errors in UI. */ }
     };
     store = new Store(join(dataDir, 'state.json'));
-    const state = () => ({ schedules: store.data.schedules, recipients: store.data.recipients, history: [...store.data.history].reverse(), settings: store.data.settings, connection: wa.status, qr: wa.qr, syncNote: wa.syncNote, connectionError: wa.error });
+    const state = () => ({ schedules: store.data.schedules, recipients: store.data.recipients, history: [...store.data.history].reverse(), settings: store.data.settings, connection: wa.status, qr: wa.qr, syncNote: wa.syncNote, connectionError: wa.error, version: app.getVersion() });
     const changed = () => { if (window && !window.isDestroyed()) window.webContents.send('state', state()); if (tray) updateTray(); };
     wa = new WhatsApp(store, dataDir, changed, debug);
     scheduler = new Scheduler(store, async (r, text, id) => {
@@ -93,7 +93,8 @@ else {
           if (!validRecipient(payload?.recipient) || !store.data.recipients.some(r => r.jid === payload.recipient.jid && r.kind === payload.recipient.kind)) throw new Error('Выберите получателя.');
           if (typeof payload.text !== 'string' || !payload.text.trim() || payload.text.length > 10000) throw new Error('Введите сообщение длиной до 10 000 символов.');
           await scheduler.test(payload.recipient, payload.text);
-        } else if (action === 'refresh') await wa.refresh();
+        } else if (action === 'connect') await wa.reconnect();
+        else if (action === 'refresh') await wa.refresh();
         else if (action === 'settings') {
           if (![0, 5, 15, 30, 60].includes(payload?.grace) || typeof payload.autostart !== 'boolean' || typeof payload.paused !== 'boolean') throw new Error('Некорректные настройки.');
           if (!smoke) app.setLoginItemSettings({ openAtLogin: payload.autostart, path: process.execPath, args: ['--hidden'] });

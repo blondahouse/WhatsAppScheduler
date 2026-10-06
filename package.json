@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-scheduler",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local desktop scheduler for WhatsApp chats and groups",
   "author": "blondahouse",
   "license": "MIT",

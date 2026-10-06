@@ -1,9 +1,11 @@
-# WhatsApp Scheduler v0.1.0
+# WhatsApp Scheduler v0.1.1
 
-First local Windows desktop release: linked-device QR authentication, separate personal/group recipients, text test-send, one-time and weekday/time-range schedules, missed-send grace, persistent duplicate protection, system tray, autostart and send history.
+Fix first-run QR connection: register as a standard web companion instead of requesting native Windows full-history synchronization. The native full-history handshake was closed by WhatsApp before issuing a QR.
 
-Download **WhatsAppScheduler-Setup-x64.exe**. The installer is unsigned; SmartScreen may require **More info → Run anyway**. No Node.js/npm/Git is required.
+Add visible QR-loading instructions, connection error diagnostics and a Retry connection button. Existing schedules and encrypted sessions are preserved.
 
-Target: Windows 10/11 x64. CI validates the Windows runner build, NSIS installation, installed renderer and local persistence with mocked WhatsApp sending. Real WhatsApp authentication/sending and manual Windows 10/11 operation are not yet verified. Follow the first-run QR/test-send flow in README.
+Windows release verification now includes a live WhatsApp QR request in the installed executable, with a fresh DPAPI-encrypted profile. No account is linked and no message is sent in this check.
 
-Ambiguous sends after a crash/disconnect are never automatically retried. Check the chat before manually repeating a message.
+Download **WhatsAppScheduler-Setup-x64.exe**. Exit the previous version from the system tray before installing. Unsigned installer: **More info → Run anyway** if SmartScreen prompts.
+
+Real account linking, chat sync and sends still require the user's first-run verification.

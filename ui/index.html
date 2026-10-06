@@ -10,9 +10,9 @@
 <body>
 <main>
   <header><div><div class="eyebrow">ЛОКАЛЬНО · НА ВАШЕМ КОМПЬЮТЕРЕ</div><h1>WhatsApp Scheduler</h1></div><span id="connection" class="badge">Подключение…</span></header>
-  <section id="auth" hidden><div><h2>Подключите WhatsApp</h2><p>WhatsApp → Связанные устройства → Привязать устройство.</p><p class="muted">Отсканируйте QR-код телефоном. Пароль не требуется.</p></div><img id="qr" alt="QR-код для подключения WhatsApp" width="240" height="240"></section>
+  <section id="auth" hidden><div><h2>Подключите WhatsApp</h2><p>WhatsApp → Связанные устройства → Привязать устройство.</p><p class="muted">Отсканируйте QR-код телефоном. Пароль не требуется.</p></div><div class="qr-box"><img id="qr" alt="QR-код для подключения WhatsApp" width="240" height="240" hidden><span id="qr-pending">Получение QR-кода…</span></div></section>
   <p id="connection-error" class="warning" hidden></p>
-  <div class="sync"><span id="sync-note" class="muted">Списки чатов появятся после подключения.</span><button id="refresh">Обновить списки</button></div>
+  <div class="sync"><span id="sync-note" class="muted">Списки чатов появятся после подключения.</span><div class="connection-actions"><button id="reconnect">Повторить подключение</button><button id="refresh">Обновить списки</button></div></div>
   <nav aria-label="Разделы"><button class="tab selected" data-tab="schedules">Расписания</button><button class="tab" data-tab="history">История</button><button class="tab" data-tab="settings">Настройки</button></nav>
   <p id="feedback" role="status" aria-live="polite" hidden></p>
   <section id="schedules-panel">
@@ -28,7 +28,7 @@
     <p class="muted">После сна для каждого повторяющегося расписания отправляется максимум одно актуальное пропущенное сообщение.</p><button id="save-settings" class="primary">Сохранить настройки</button></div>
     <p class="muted">Компьютер должен быть включён, приложение — запущено или свёрнуто в область уведомлений. Нужен интернет.</p>
   </section>
-  <footer>Неофициальная интеграция. Данные хранятся на этом компьютере.</footer>
+  <footer>Неофициальная интеграция. Данные хранятся на этом компьютере. <span id="app-version"></span></footer>
 </main>
 <dialog id="editor">
   <form id="schedule-form" novalidate>

@@ -61,7 +61,7 @@ export class WhatsApp {
         }
       };
       await this.saveAuth();
-      const socket = makeWASocket({ auth: this.state, logger: pino({ level: 'silent' }), browser: Browsers.windows('Desktop'), syncFullHistory: true, markOnlineOnConnect: false, connectTimeoutMs: 30000, defaultQueryTimeoutMs: 30000 });
+      const socket = makeWASocket({ auth: this.state, logger: pino({ level: 'silent' }), browser: Browsers.windows('Desktop'), syncFullHistory: false, markOnlineOnConnect: false, connectTimeoutMs: 30000, defaultQueryTimeoutMs: 30000 });
       this.socket = socket;
       const active = () => generation === this.generation && !this.stopping;
       socket.ev.on('creds.update', update => {
@@ -136,6 +136,12 @@ export class WhatsApp {
   scheduleReconnect(ms: number): void {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => { void this.connect(); }, ms);
+  }
+  async reconnect(): Promise<void> {
+    if (this.stopping) throw new Error('Не удалось подключиться. Перезапустите приложение, чтобы открыть защищённую сессию.');
+    clearTimeout(this.timer); ++this.generation;
+    this.socket?.end(undefined); this.socket = undefined; this.qr = '';
+    await this.connect();
   }
   async refresh(resync = true): Promise<void> {
     if (!this.connected || !this.socket) throw new Error('Нет соединения с WhatsApp.');

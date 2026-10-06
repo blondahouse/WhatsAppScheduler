@@ -17,7 +17,12 @@ function button(text, fn, cls) { const b = element('button', text, cls); b.type 
 function render(next) {
   state = next;
   $('connection').textContent = state.connection; $('connection').className = `badge ${state.connection === 'WhatsApp подключён' ? 'success' : ''}`;
-  $('auth').hidden = !state.qr; if (state.qr) $('qr').src = state.qr;
+  $('auth').hidden = state.connection === 'WhatsApp подключён';
+  $('qr').hidden = !state.qr; $('qr-pending').hidden = !!state.qr;
+  $('qr-pending').textContent = state.connection === 'Нет подключения' ? 'QR появится после подключения к WhatsApp.' : 'Получение QR-кода…';
+  if (state.qr) $('qr').src = state.qr;
+  $('reconnect').hidden = state.connection === 'WhatsApp подключён';
+  $('app-version').textContent = state.version ? `v${state.version}` : '';
   $('connection-error').hidden = !state.connectionError; $('connection-error').textContent = state.connectionError;
   $('sync-note').textContent = state.syncNote || 'Списки чатов появятся после подключения.';
   $('refresh').disabled = state.connection !== 'WhatsApp подключён';
@@ -81,6 +86,7 @@ $('recipient-search').addEventListener('input',()=>renderRecipients());
 for(const input of document.querySelectorAll('input[name="recipient-kind"]')) input.addEventListener('change',()=> { $('recipient-search').value='';renderRecipients(''); });
 for(const id of ['close-editor','cancel']) $(id).addEventListener('click',()=> { if(!formBusy) $('editor').close(); });
 $('editor').addEventListener('cancel',event=> { if(formBusy) event.preventDefault(); });
+$('reconnect').addEventListener('click',()=>action(async()=>{ $('reconnect').disabled=true; try { await call('connect'); } finally { $('reconnect').disabled=false; } }));
 $('refresh').addEventListener('click',()=>action(async()=>{ $('refresh').disabled=true; try { await call('refresh'); notice('Списки обновлены.'); } finally { $('refresh').disabled=state.connection !== 'WhatsApp подключён'; } }));
 $('save-settings').addEventListener('click',()=>action(async()=>{ await call('settings',{grace:Number($('grace').value),autostart:$('autostart').checked,paused:$('global-paused').checked});notice('Настройки сохранены.'); }));
 async function formAction(fn) {
