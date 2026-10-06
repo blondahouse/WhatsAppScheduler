@@ -13,9 +13,10 @@ export class WhatsApp {
   status = 'Подключение…'; qr = ''; syncNote = ''; error = '';
   stopping = false; retries = 0; timer?: ReturnType<typeof setTimeout>;
   names = new Map<string, string>(); generation = 0;
+  report: (error: unknown) => void;
   auth: { creds: ReturnType<typeof initAuthCreds>; keys: Record<string, unknown> } | undefined;
   writes: Promise<void> = Promise.resolve();
-  constructor(store: Store, directory: string, changed: () => void) { this.store = store; this.directory = directory; this.changed = changed; }
+  constructor(store: Store, directory: string, changed: () => void, report: (error: unknown) => void = () => {}) { this.store = store; this.directory = directory; this.changed = changed; this.report = report; }
   get connected(): boolean { return this.status === 'WhatsApp подключён'; }
   async saveAuth(): Promise<void> {
     this.writes = this.writes.then(async () => {
@@ -81,6 +82,8 @@ export class WhatsApp {
             ++this.generation; // Ignore late events from the disconnected socket.
             this.qr = ''; this.socket = undefined;
             const code = (update.lastDisconnect?.error as any)?.output?.statusCode;
+            this.report(update.lastDisconnect?.error || new Error('WhatsApp connection closed'));
+            this.error = `Соединение с WhatsApp закрыто${code ? ` (код ${code})` : ''}. Приложение повторит подключение автоматически.`;
             if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession) {
               await this.writes.catch(() => {});
               rmSync(join(this.directory, 'auth.enc'), { force: true });
@@ -120,7 +123,8 @@ export class WhatsApp {
       socket.ev.on('chats.upsert', chats);
       socket.ev.on('chats.update', updates => chats(updates.filter(c => c.id) as any));
       socket.ev.on('chats.delete', ids => { if (active()) { this.store.change(d => { d.recipients = d.recipients.filter(r => !ids.includes(r.jid)); }); this.changed(); } });
-    } catch {
+    } catch (error) {
+      this.report(error);
       this.status = 'Нет подключения'; this.error = 'Не удалось подключиться или открыть защищённую сессию. Проверьте интернет и перезапустите приложение. Данные сессии не удалены.';
       this.changed(); this.scheduleReconnect(30000);
     }

@@ -7,7 +7,7 @@ async function probe(label, version) {
     const finish = result => { if(done) return;done=true;clearTimeout(timer);socket?.end(undefined);resolve({label,version:version||'bundled',...result}); };
     try {
       const keys = {};
-      socket = makeWASocket({ version, auth: { creds:initAuthCreds(), keys:{get:async(type,ids)=>Object.fromEntries(ids.filter(id=>keys[`${type}:${id}`]).map(id=>[id,keys[`${type}:${id}`]])),set:async data=>{for(const [type,values] of Object.entries(data))for(const [id,value] of Object.entries(values))keys[`${type}:${id}`]=value;} } },logger:pino({level:'silent'}),browser:Browsers.windows('Desktop'),connectTimeoutMs:25000,defaultQueryTimeoutMs:25000,markOnlineOnConnect:false });
+      socket = makeWASocket({ ...(version ? { version } : {}), auth: { creds:initAuthCreds(), keys:{get:async(type,ids)=>Object.fromEntries(ids.filter(id=>keys[`${type}:${id}`]).map(id=>[id,keys[`${type}:${id}`]])),set:async data=>{for(const [type,values] of Object.entries(data))for(const [id,value] of Object.entries(values))keys[`${type}:${id}`]=value;} } },logger:pino({level:'silent'}),browser:Browsers.windows('Desktop'),connectTimeoutMs:25000,defaultQueryTimeoutMs:25000,markOnlineOnConnect:false });
       socket.ev.on('connection.update',u=> {
         if(u.qr) finish({qr:true});
         if(u.connection==='close')finish({qr:false,code:u.lastDisconnect?.error?.output?.statusCode,message:u.lastDisconnect?.error?.message});

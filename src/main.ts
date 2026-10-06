@@ -10,7 +10,8 @@ import { validate, validRecipient, type Schedule } from './model.ts';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const smoke = process.env.WASCHEDULER_SMOKE === '1';
-if (smoke && process.env.WASCHEDULER_DATA) app.setPath('userData', process.env.WASCHEDULER_DATA);
+const verifyingQr = process.env.WASCHEDULER_VERIFY_QR === '1';
+if ((smoke || verifyingQr) && process.env.WASCHEDULER_DATA) app.setPath('userData', process.env.WASCHEDULER_DATA);
 let window: BrowserWindow, tray: Tray, store: Store, scheduler: Scheduler, wa: WhatsApp;
 let exiting = false, timer: ReturnType<typeof setInterval>;
 app.setAppUserModelId('house.blonda.whatsapp-scheduler');
@@ -30,7 +31,7 @@ else {
     store = new Store(join(dataDir, 'state.json'));
     const state = () => ({ schedules: store.data.schedules, recipients: store.data.recipients, history: [...store.data.history].reverse(), settings: store.data.settings, connection: wa.status, qr: wa.qr, syncNote: wa.syncNote, connectionError: wa.error });
     const changed = () => { if (window && !window.isDestroyed()) window.webContents.send('state', state()); if (tray) updateTray(); };
-    wa = new WhatsApp(store, dataDir, changed);
+    wa = new WhatsApp(store, dataDir, changed, debug);
     scheduler = new Scheduler(store, async (r, text, id) => {
       if (smoke) return;
       try { await wa.send(r, text, id); } catch (e) { debug(e); throw e; }
@@ -110,7 +111,7 @@ else {
     await window.loadFile(join(root, 'ui/index.html'));
     if (!process.argv.includes('--hidden') || smoke) window.show();
     if (!smoke) {
-      app.setLoginItemSettings({ openAtLogin: store.data.settings.autostart, path: process.execPath, args: ['--hidden'] });
+      if (!verifyingQr) app.setLoginItemSettings({ openAtLogin: store.data.settings.autostart, path: process.execPath, args: ['--hidden'] });
       void wa.connect();
     } else {
       wa.status = 'WhatsApp подключён';

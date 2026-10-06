@@ -52,6 +52,8 @@ jobs:
           if (!(Test-Path $env:APP_EXE)) { throw "Installed executable missing" }
           npm run smoke
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/qr-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
