@@ -26,6 +26,7 @@
     <div class="settings-box"><label class="check"><input id="autostart" type="checkbox">Start with Windows</label><label class="check"><input id="global-paused" type="checkbox">Pause all schedules</label>
     <label for="grace">Send a missed message if it is no more than:</label><select id="grace"><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">60 minutes</option><option value="0">Do not send missed messages</option></select>
     <p class="muted">After sleep, each recurring schedule sends at most one eligible missed message.</p><button id="save-settings" class="primary">Save settings</button></div>
+    <div class="settings-box"><h3>WhatsApp account</h3><p class="muted">Sign out to unlink this device. Schedules and history are kept; all schedules will be paused until you resume them after signing in.</p><button id="logout" class="danger">Sign out of WhatsApp</button></div>
     <div class="settings-box"><h3>Chat sync diagnostics</h3><p class="muted">Copy a report to help troubleshoot missing chats. Includes connection status and event counts; excludes contacts, message text and session keys.</p><button id="copy-diagnostics">Copy diagnostics</button></div>
     <p class="muted">Keep the computer on and the app running, including in the system tray. An internet connection is required.</p>
   </section>

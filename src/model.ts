@@ -11,7 +11,8 @@ export type Attempt = {
   result: 'sending' | 'sent' | 'failed' | 'uncertain' | 'skipped'; error?: string;
 };
 export type Settings = { grace: number; autostart: boolean; paused: boolean; trayHintSeen: boolean };
-export type Data = { version: 1; schedules: Schedule[]; recipients: Recipient[]; history: Attempt[]; settings: Settings };
+export type RecipientMetadata = Record<string, { contact?: string; chat?: string; business?: string; profile?: string; push?: string; legacy?: string; aliases?: string[] }>;
+export type Data = { recipientMetadata?: RecipientMetadata; version: 1; schedules: Schedule[]; recipients: Recipient[]; history: Attempt[]; settings: Settings };
 export function defaults(): Data {
   return { version: 1, schedules: [], recipients: [], history: [], settings: { grace: 30, autostart: true, paused: false, trayHintSeen: false } };
 }

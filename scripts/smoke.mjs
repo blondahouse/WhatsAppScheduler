@@ -57,6 +57,21 @@ try {
   await page.locator('[data-tab="settings"]').click();await expect(page.locator('#grace')).toHaveValue('15');await expect(page.locator('#autostart')).not.toBeChecked();
   const stored=JSON.parse(readFileSync(join(data,'state.json'),'utf8'));
   expect(stored.schedules[0].text).toBe('Доброе утро\n🙂 — изменено');
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('#logout').click();
+  await expect(page.locator('#connection')).toHaveText('WhatsApp connected');
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#logout').click();
+  await expect(page.locator('#connection')).toHaveText('Signed out');
+  await expect(page.locator('#logout')).toBeDisabled();
+  await expect(page.locator('#reconnect')).toHaveText('Connect WhatsApp');
+  const signedOut = JSON.parse(readFileSync(join(data,'state.json'),'utf8'));
+  expect(signedOut.recipients).toEqual([]);
+  expect(signedOut.recipientMetadata).toEqual({});
+  expect(signedOut.schedules).toHaveLength(2);
+  expect(signedOut.history.length).toBeGreaterThan(0);
+  expect(signedOut.settings.paused).toBe(true);
+  await page.screenshot({path:'smoke-output/signed-out.png',fullPage:true});
   expect(errors).toEqual([]);
   console.log('Installed Windows app: renderer CRUD, validation, personal/group separation, test-send mock, Unicode, settings, DPAPI roundtrip, tray close, restart persistence passed. WhatsApp network not mocked as verified.');
 } catch(e) { const windows=app.windows();if(windows.length) await windows[0].screenshot({path:'smoke-output/failure.png'}).catch(()=>{});console.log('Smoke failure:',e.message);console.log('Renderer errors:',errors);throw e; } finally { await app.close(); }

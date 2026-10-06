@@ -6,7 +6,7 @@ const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const statusNames = { active:'Active', paused:'Paused', completed:'Completed', error:'Error' };
 const resultNames = { sending:'Sending…', sent:'Sent', failed:'Error', uncertain:'Result unconfirmed', skipped:'Skipped' };
 function element(tag, text, cls) { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
-function recipientText(r) { return `${r.kind === 'group' ? 'Group' : 'Personal chat'} · ${r.name}`; }
+function recipientText(r) { r = state?.recipients.find(x => x.jid === r.jid && x.kind === r.kind) || r; return `${r.kind === 'group' ? 'Group' : 'Personal chat'} · ${r.name}`; }
 function notice(text, error = false) { $('feedback').textContent = text; $('feedback').className = error ? 'error' : 'success'; $('feedback').hidden = false; }
 async function call(action, payload) {
   const response = await window.waScheduler.call(action, payload);
@@ -19,7 +19,9 @@ function button(text, fn, cls) { const b = element('button', text, cls); b.type 
 function render(next) {
   state = next;
   $('connection').textContent = state.connection; $('connection').className = `badge ${state.connection === 'WhatsApp connected' ? 'success' : ''}`;
-  $('auth').hidden = state.connection === 'WhatsApp connected';
+  $('auth').hidden = ['WhatsApp connected','Signed out','Signing out…'].includes(state.connection);
+  $('logout').disabled = state.connection !== 'WhatsApp connected';
+  $('reconnect').textContent = state.connection === 'Signed out' ? 'Connect WhatsApp' : 'Reconnect';
   $('qr').hidden = !state.qr; $('qr-pending').hidden = !!state.qr;
   $('qr-pending').textContent = state.connection === 'Disconnected' ? 'The QR code will appear when WhatsApp is reachable.' : 'Requesting QR code…';
   if (state.qr) $('qr').src = state.qr;
@@ -82,6 +84,12 @@ function payload() {
 }
 for (const day of [1,2,3,4,5,6,0]) { const label = element('label'), input = element('input'); input.type='checkbox'; input.value=String(day); label.append(input,dayNames[day]); $('weekdays').append(label); }
 for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click',()=> { for(const t of document.querySelectorAll('.tab')) { t.classList.toggle('selected',t === tab); $(`${t.dataset.tab}-panel`).hidden = t !== tab; } });
+$('logout').addEventListener('click',()=>action(async()=> {
+  if (!confirm('Sign out of WhatsApp and unlink this device? Your schedules and history will be kept, and all schedules will be paused.')) return;
+  $('logout').disabled=true;
+  try { await call('logout'); notice('Signed out. Your schedules are saved and paused.'); }
+  finally { $('logout').disabled=state.connection !== 'WhatsApp connected'; }
+}));
 $('copy-diagnostics').addEventListener('click',()=>action(async()=>{ await call('diagnostics');notice('Diagnostics copied. Paste the report into the support chat.'); }));
 $('new').addEventListener('click',()=>openEditor());
 $('schedule-kind').addEventListener('change',showKind);

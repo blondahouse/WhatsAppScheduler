@@ -106,3 +106,10 @@
 После подключения подождите 60–90 секунд: приложение проверяет, не застряли ли события WhatsApp во внутреннем буфере. Откройте WhatsApp на телефоне и отправьте или получите сообщение в существующем личном чате, затем нажмите **Refresh lists**. Если список всё ещё пуст, откройте **Settings → Copy diagnostics** и вставьте отчёт в чат поддержки. Отчёт не содержит сообщений, номеров телефонов, имён контактов или ключей сессии. Приложение ничего автоматически не загружает.
 
 Восстановление буфера проверено на механизме событий Baileys; успешная загрузка конкретного аккаунта пока не подтверждена. Если телефон не передал начальную историю, повторная привязка устройства может потребоваться.
+
+
+## Recipient names and signing out
+
+Personal chat names use this priority: saved contact name → chat title → verified business name → profile name → incoming message name → known phone number. Blank names and raw WhatsApp addresses are ignored. Name sources and explicit phone/LID aliases are stored locally in `state.json` and survive restarts. WhatsApp may omit all names; an unmapped LID then appears as “Unnamed chat · …1234”. The phonebook does not create chats by itself. Sending continues to use the original chat JID.
+
+In Settings, **Sign out of WhatsApp** revokes the linked device through WhatsApp before removing `auth.enc` and the recipient/name cache. Schedules and send history stay on disk; all schedules are paused. No automatic new QR is requested. Click **Connect WhatsApp** to sign in again, check the account, then resume schedules manually. If remote logout fails, credentials are retained and the app explains how to reconnect or unlink the device on the phone. Logout waits until no scheduled send is in progress.

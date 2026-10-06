@@ -19,7 +19,7 @@ export class WhatsApp {
   report: (error: unknown) => void;
   auth: { creds: ReturnType<typeof initAuthCreds>; keys: Record<string, unknown> } | undefined;
   writes: Promise<void> = Promise.resolve();
-  constructor(store: Store, directory: string, changed: () => void, report: (error: unknown) => void = () => {}) { this.store = store; this.directory = directory; this.changed = changed; this.report = report; }
+  constructor(store: Store, directory: string, changed: () => void, report: (error: unknown) => void = () => {}) { this.store = store; this.directory = directory; this.changed = changed; this.report = report; this.recipients = new RecipientSync(store.data.recipientMetadata); }
   get connected(): boolean { return this.status === 'WhatsApp connected'; }
   async saveAuth(): Promise<void> {
     this.writes = this.writes.then(async () => {
@@ -80,7 +80,7 @@ export class WhatsApp {
         if (!active()) return;
         if (update.receivedPendingNotifications) this.health.pendingReceived = true;
         void (async () => {
-          if (update.qr) { this.qr = await QRCode.toDataURL(update.qr, { width: 240, margin: 2, color: { dark: '#111111', light: '#ffffff' } }); if (!active()) return; this.status = 'Scan QR to sign in'; }
+          if (update.qr) { const qr = await QRCode.toDataURL(update.qr, { width: 240, margin: 2, color: { dark: '#111111', light: '#ffffff' } }); if (!active()) return; this.qr = qr; this.status = 'Scan QR to sign in'; }
           if (update.connection === 'open') {
             this.qr = ''; this.status = 'WhatsApp connected'; this.retries = 0; this.openedAt = Date.now(); this.error = '';
             clearInterval(this.syncTimer);
@@ -106,7 +106,7 @@ export class WhatsApp {
               await this.writes.catch(() => {});
               rmSync(join(this.directory, 'auth.enc'), { force: true });
               this.auth = undefined; this.writes = Promise.resolve();
-              this.store.change(d => { d.recipients = []; }); this.recipients.names.clear();
+              this.store.change(d => { d.recipients = []; d.recipientMetadata = {}; }); this.recipients.clear();
               this.status = 'Scan QR to sign in';
               this.syncNote = 'The WhatsApp session ended. Scan the QR code again.';
               this.scheduleReconnect(1000);
@@ -126,12 +126,12 @@ export class WhatsApp {
       const contacts = (list: Parameters<RecipientSync['contacts']>[1]) => {
         if (!active()) return;
         this.health.contactEvents++;
-        this.store.change(d => this.recipients.contacts(d.recipients, list)); updated();
+        this.store.change(d => { this.recipients.contacts(d.recipients, list); d.recipientMetadata = this.recipients.metadata; }); updated();
       };
       const chats = (list: Parameters<RecipientSync['chats']>[1]) => {
         if (!active()) return;
         this.health.chatEvents++;
-        this.store.change(d => this.recipients.chats(d.recipients, list)); updated();
+        this.store.change(d => { this.recipients.chats(d.recipients, list); d.recipientMetadata = this.recipients.metadata; }); updated();
       };
       socket.ev.on('messaging-history.set', history => {
         if (!active()) return;
@@ -141,12 +141,13 @@ export class WhatsApp {
           this.recipients.contacts(d.recipients, history.contacts);
           this.recipients.chats(d.recipients, history.chats);
           this.recipients.messages(d.recipients, history.messages);
+          d.recipientMetadata = this.recipients.metadata;
         }); updated();
       });
       socket.ev.on('messages.upsert', event => {
         if (!active()) return;
         this.health.messageEvents++; this.health.personalMessageAddresses += event.messages.filter(m => { const jid = chatJid(m.key.remoteJid); return jid && !jid.endsWith('@g.us'); }).length;
-        this.store.change(d => this.recipients.messages(d.recipients, event.messages)); updated();
+        this.store.change(d => { this.recipients.messages(d.recipients, event.messages); d.recipientMetadata = this.recipients.metadata; }); updated();
       });
       socket.ev.on('contacts.upsert', contacts);
       socket.ev.on('contacts.update', contacts);
@@ -168,6 +169,33 @@ export class WhatsApp {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => { void this.connect(); }, ms);
   }
+  async logout(): Promise<void> {
+    if (!this.connected || !this.socket) throw new Error('No connection to WhatsApp.');
+    clearTimeout(this.timer); clearInterval(this.syncTimer); ++this.generation;
+    const socket = this.socket;
+    this.status = 'Signing out…'; this.qr = ''; this.changed();
+    try {
+      // Revoke the linked device, rather than only deleting local credentials.
+      await socket.logout();
+    } catch (error) {
+      this.report(error);
+      socket.end(undefined); this.socket = undefined;
+      this.status = 'Disconnected';
+      this.error = 'Unable to sign out of WhatsApp. Reconnect and try again, or unlink this device on your phone.';
+      this.changed();
+      throw new Error(this.error);
+    }
+    socket.end(undefined); this.socket = undefined;
+    await this.writes;
+    rmSync(join(this.directory, 'auth.enc'), { force: true });
+    this.auth = undefined; this.state = undefined; this.writes = Promise.resolve();
+    this.recipients.clear();
+    this.store.change(d => {
+      d.recipients = []; d.recipientMetadata = {}; d.settings.paused = true;
+    });
+    this.status = 'Signed out'; this.syncNote = 'Signed out. Schedules are paused. Click Connect WhatsApp to sign in again.';
+    this.error = ''; this.changed();
+  }
   async reconnect(): Promise<void> {
     if (this.stopping) throw new Error('Unable to connect. Restart the app to open the protected session.');
     clearTimeout(this.timer); clearInterval(this.syncTimer); ++this.generation;
@@ -176,14 +204,17 @@ export class WhatsApp {
   }
   async refresh(resync = true): Promise<void> {
     if (!this.connected || !this.socket) throw new Error('No connection to WhatsApp.');
-    const groups = await this.socket.groupFetchAllParticipating();
+    const socket = this.socket, generation = this.generation;
+    const groups = await socket.groupFetchAllParticipating();
+    if (generation !== this.generation || socket !== this.socket) return;
     this.store.change(d => {
       d.recipients = d.recipients.filter(r => r.kind !== 'group');
       for (const g of Object.values(groups)) d.recipients.push({ jid: g.id, name: g.subject, kind: 'group' });
     });
     if (resync) {
-      await this.socket.resyncAppState(['critical_block', 'critical_unblock_low', 'regular_high', 'regular_low', 'regular'], true);
-      if (recoverStalledEvents(this.socket.ev, this.health.pendingReceived, Date.now() - this.openedAt)) this.health.bufferRecoveries++;
+      await socket.resyncAppState(['critical_block', 'critical_unblock_low', 'regular_high', 'regular_low', 'regular'], true);
+      if (generation !== this.generation || socket !== this.socket) return;
+      if (recoverStalledEvents(socket.ev, this.health.pendingReceived, Date.now() - this.openedAt)) this.health.bufferRecoveries++;
     }
     this.syncNote = this.recipients.note(this.store.data.recipients) + (this.store.data.recipients.some(r => r.kind === 'personal') ? ' Lists refreshed.' : ' Waiting for history from your phone. Open WhatsApp on your phone and send or receive a message in the personal chat.'); this.changed();
   }

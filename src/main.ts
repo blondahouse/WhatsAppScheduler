@@ -98,6 +98,9 @@ else {
           if (!validRecipient(payload?.recipient) || !store.data.recipients.some(r => r.jid === payload.recipient.jid && r.kind === payload.recipient.kind)) throw new Error('Choose a recipient.');
           if (typeof payload.text !== 'string' || !payload.text.trim() || payload.text.length > 10000) throw new Error('Enter a message of up to 10,000 characters.');
           await scheduler.test(payload.recipient, payload.text);
+        } else if (action === 'logout') {
+          if (scheduler.inFlight.size) throw new Error('Wait for the current send to finish.');
+          await wa.logout();
         } else if (action === 'connect') await wa.reconnect();
         else if (action === 'refresh') await wa.refresh();
         else if (action === 'settings') {
@@ -110,7 +113,7 @@ else {
         debug(e);
         const text = e instanceof Error ? e.message : '';
         // Only allow errors deliberately written for users, never dependency exceptions.
-        const safe = /^(Choose|Enter|One-time|This time|The end time|The interval|The message|Wait for|This schedule|Completed schedules|Invalid settings\.|Invalid request\.|No connection to WhatsApp\.|Unable to send the message\.|Sending is not confirmed)/.test(text);
+        const safe = /^(Choose|Enter|One-time|This time|The end time|The interval|The message|Wait for|This schedule|Completed schedules|Invalid settings\.|Invalid request\.|No connection to WhatsApp\.|Unable to sign out of WhatsApp\.|Unable to send the message\.|Sending is not confirmed)/.test(text);
         return { ok: false, error: safe ? text : 'Unable to complete the action. Check your connection and try again.' };
       }
     });
@@ -121,6 +124,7 @@ else {
       void wa.connect();
     } else {
       wa.status = 'WhatsApp connected';
+      wa.socket = { logout: async () => {}, end: () => {} } as unknown as NonNullable<WhatsApp['socket']>;
       store.change(d => { d.recipients = [{ jid: '380501234567@s.whatsapp.net', name: 'Test chat', kind: 'personal' }, { jid: '120363000000000000@g.us', name: 'Test group', kind: 'group' }]; }); changed();
     }
     timer = setInterval(() => { void scheduler.tick().catch(fatal); }, 30000);
