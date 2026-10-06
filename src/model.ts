@@ -2,12 +2,13 @@ export type Recipient = { jid: string; name: string; kind: 'personal' | 'group' 
 export type Schedule = {
   id: string; recipient: Recipient; text: string; enabled: boolean;
   kind: 'once' | 'weekly'; once?: string; days?: number[]; from?: string; to?: string; interval?: string;
+  jitterMinutes?: number; jitterSeed?: string;
   createdAt: number; updatedAt: number; notBefore: number;
   status: 'active' | 'paused' | 'completed' | 'error'; error?: string;
   consumed: Record<string, number[]>; floorDate: string;
 };
 export type Attempt = {
-  id: string; scheduleId?: string; slot?: string; at: number; recipient: Recipient;
+  id: string; scheduleId?: string; slot?: string; plannedAt?: number; jitterOffset?: number; at: number; recipient: Recipient;
   result: 'sending' | 'sent' | 'failed' | 'uncertain' | 'skipped'; error?: string;
 };
 export type Settings = { grace: number; autostart: boolean; paused: boolean; trayHintSeen: boolean };
@@ -41,11 +42,13 @@ export function parseLocal(s: string): Date {
   return d;
 }
 export function validate(s: Partial<Schedule>, now = Date.now()): void {
+  if (s.jitterMinutes !== undefined && (!Number.isInteger(s.jitterMinutes) || s.jitterMinutes < 0 || s.jitterMinutes > 1440)) throw new Error('Enter jitter as a whole number of minutes from 1 to 1440, or turn it off.');
   if (!validRecipient(s.recipient)) throw new Error('Choose a recipient.');
   if (typeof s.text !== 'string' || !s.text.trim()) throw new Error('Enter a message.');
   if (s.text.length > 10000) throw new Error('The message must not exceed 10,000 characters.');
   if (s.kind === 'once') {
     if (!s.once || parseLocal(s.once).getTime() <= now) throw new Error('One-time date and time must be in the future.');
+    if (s.jitterMinutes && parseLocal(s.once).getTime() - s.jitterMinutes * 60000 <= now) throw new Error('One-time date and time must leave the entire jitter window in the future.');
   } else if (s.kind === 'weekly') {
     if (!Array.isArray(s.days) || !s.days.length || s.days.some(d => !Number.isInteger(d) || d < 0 || d > 6)) throw new Error('Choose at least one day of the week.');
     const start = minutes(s.from), end = minutes(s.to), interval = minutes(s.interval);

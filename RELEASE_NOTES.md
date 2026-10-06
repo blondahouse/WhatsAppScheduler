@@ -1,10 +1,12 @@
-# WhatsApp Scheduler v0.1.5
+# WhatsApp Scheduler v0.1.6
 
-- Refresh lists now fetches current groups and forces a complete contact snapshot, instead of only requesting deltas from the existing cursor.
-- Only the contact collection cursor is reset, under Baileys’ app-state processing mutex. Session, Signal keys, schedules and send history are retained.
-- Group member metadata, history chat aliases and group sender profile names enrich existing personal chats without adding non-chat contacts to the dropdown.
-- Refresh resolves phone-to-LID aliases using known phone numbers in bounded batches. Anonymous IDs are never treated as phone numbers; no messages are sent.
-- Known full phone numbers appear when no human name is available. Unknown LIDs still show an unnamed label if WhatsApp supplies no mapping.
-- The UI shows refresh progress, actual labels added/changed, and counts of named, phone-only and unresolved personal chats. Snapshot failures are disclosed instead of unconditional “Lists refreshed”.
+- Enable jitter separately in any one-time or weekly schedule. Enter a whole number of minutes (1–1440); disabled by default.
+- Each execution chooses a nonzero offset from −J to −1 or +1 to +J minutes. A cryptographically random persistent schedule seed and nominal slot key make the choice stable across restart.
+- Jitter may cross midnight and the weekly From–To boundaries. The selected weekday belongs to the original nominal execution.
+- One-time schedules require their complete jitter window to be in the future when saved.
+- Catch-up never starts sending in the original nominal minute. Messages beyond the jitter window are skipped; the existing grace limit still applies inside the window.
+- Distinct normal executions that land in the same minute are preserved. Older missed executions still coalesce into at most one catch-up message.
+- Cards display jitter and history includes the chosen shifted time and offset. Send test remains immediate.
+- Existing schedules keep jitter off. Persistent claims and execution IDs continue to use the nominal slot, preventing duplicates after restart.
 
-Tests cover snapshot reset scope and mutex, unavailable snapshots, disconnected sockets, report counts, group/phone aliases, history aliases and group profile names. The installed Windows UI and unauthenticated real QR acquisition are verified in CI. Account-specific contact snapshots and phone lookup results require verification with the user’s linked WhatsApp account.
+55 unit/integration tests cover jitter bounds, validation, early/late sends, restart, catch-up, midnight, collisions, and immediate tests. Installed UI checks cover enabling, validation, editing and persistence. Real unauthenticated QR acquisition is also checked. Actual WhatsApp receipt time depends on network and server delivery; jitter controls when the app begins the send.

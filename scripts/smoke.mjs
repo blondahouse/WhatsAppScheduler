@@ -20,9 +20,16 @@ try {
   await page.locator('#schedule-kind').selectOption('weekly');
   await page.locator('#weekdays input[value="1"]').check();
   await page.locator('#from').fill('08:00');await page.locator('#to').fill('08:00');await page.locator('#interval').fill('04:00');
+  await page.locator('#jitter-enabled').check();
+  await page.locator('#jitter-minutes').fill('0');
+  await page.locator('#save').click();await expect(page.locator('#form-error')).toContainText('whole number of minutes');
+  await page.locator('#jitter-minutes').fill('5');
   await page.locator('#save').click();await expect(page.locator('.card')).toHaveCount(1);
   await expect(page.locator('.card')).toContainText('08:00–08:00');
+  await expect(page.locator('.card')).toContainText('jitter ±5 min');
   await page.locator('.card button').filter({hasText:'Edit'}).click();
+  await expect(page.locator('#jitter-enabled')).toBeChecked();
+  await expect(page.locator('#jitter-minutes')).toHaveValue('5');
   await page.locator('#to').fill('07:00');await page.locator('#save').click();await expect(page.locator('#form-error')).toContainText('cannot be earlier');
   await page.locator('#to').fill('08:00');
   await page.locator('#message').fill('Доброе утро\n🙂 — изменено');
@@ -60,6 +67,9 @@ try {
   await expect(page.locator('.card')).toHaveCount(2);
   await page.locator('[data-tab="settings"]').click();await expect(page.locator('#grace')).toHaveValue('15');await expect(page.locator('#autostart')).not.toBeChecked();
   const stored=JSON.parse(readFileSync(join(data,'state.json'),'utf8'));
+  expect(stored.schedules[0].jitterMinutes).toBe(5);
+  expect(stored.schedules[0].jitterSeed).toMatch(/^[a-f0-9]{64}$/);
+  expect(stored.schedules[1].jitterMinutes).toBe(0);
   expect(stored.schedules[0].text).toBe('Доброе утро\n🙂 — изменено');
   page.once('dialog', dialog => dialog.dismiss());
   await page.locator('#logout').click();

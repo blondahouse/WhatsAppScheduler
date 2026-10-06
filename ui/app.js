@@ -40,7 +40,7 @@ function render(next) {
     const card = element('article', undefined, 'card'), top = element('div', undefined, 'card-top');
     top.append(element('span', recipientText(s.recipient), 'recipient-name'), element('span', statusNames[s.status], `badge ${s.status === 'completed' ? 'success' : s.status === 'error' ? 'error' : ''}`));
     const info = s.kind === 'once' ? `One-time · ${s.once.replace('T',' · ')}` : `Recurring · ${[1,2,3,4,5,6,0].filter(d => s.days.includes(d)).map(d => dayNames[d]).join(' · ')} · ${s.from}–${s.to} · every ${s.interval}`;
-    card.append(top, element('p', s.text, 'message-preview'), element('div', info, 'card-info'));
+    card.append(top, element('p', s.text, 'message-preview'), element('div', info + (s.jitterMinutes ? ` · jitter ±${s.jitterMinutes} min (no zero)` : ''), 'card-info'));
     if (s.error) card.append(element('p', humanError(s.error), 'error small'));
     const actions = element('div', undefined, 'card-actions');
     const toggle = element('label', undefined, 'toggle-label'), input = element('input'); input.type = 'checkbox'; input.checked = s.enabled; input.disabled = s.status === 'completed'; input.setAttribute('aria-label',`Enable schedule for ${s.recipient.name}`);
@@ -53,6 +53,7 @@ function render(next) {
   for (const h of state.history) {
     const row = element('div',undefined,'history-row');
     row.append(element('span',new Date(h.at).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'})),element('span',recipientText(h.recipient)),element('span',resultNames[h.result],h.result === 'sent' ? 'success' : h.result === 'uncertain' || h.result === 'failed' ? 'error' : 'muted'));
+    if (h.jitterOffset) row.append(element('span',`Scheduled for ${new Date(h.plannedAt).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'})} · jitter ${h.jitterOffset > 0 ? '+' : ''}${h.jitterOffset} min`,'history-error muted'));
     if (h.error) row.append(element('span',humanError(h.error),'history-error')); history.append(row);
   }
   if ($('editor').open) renderRecipients();
@@ -67,6 +68,7 @@ function renderRecipients(selected = $('recipient').value) {
   $('recipient').value = selected;
   $('recipient-note').textContent = rs.length ? '' : query ? 'No recipients match your search.' : kind === 'personal' ? 'Waiting for personal chats from your phone. Open WhatsApp on your phone and send or receive a message in the chat. It will appear here automatically.' : 'No groups available. Click Refresh lists.';
 }
+function showJitter() { const enabled = $('jitter-enabled').checked; $('jitter-field').hidden = !enabled; $('jitter-note').hidden = !enabled; }
 function showKind() { const weekly = $('schedule-kind').value === 'weekly'; $('weekly-fields').hidden = !weekly; $('once-fields').hidden = weekly; }
 function openEditor(s) {
   editing = s?.id; $('schedule-form').reset(); $('form-error').hidden = true; $('test-result').hidden = true;
@@ -79,10 +81,11 @@ function openEditor(s) {
   [$('once-date').value,$('once-time').value] = once.split('T');
   $('from').value = s?.from || '08:00'; $('to').value = s?.to || '08:00'; $('interval').value = s?.interval || '00:30';
   for (const input of $('weekdays').querySelectorAll('input')) input.checked = s?.days?.includes(Number(input.value)) || false;
-  showKind(); $('editor').showModal();
+  $('jitter-enabled').checked = !!s?.jitterMinutes; $('jitter-minutes').value = String(s?.jitterMinutes || 5);
+  showJitter(); showKind(); $('editor').showModal();
 }
 function payload() {
-  return { id:editing, recipient:state.recipients.find(r => r.jid === $('recipient').value), text:$('message').value,kind:$('schedule-kind').value,once:`${$('once-date').value}T${$('once-time').value}`,days:[...$('weekdays').querySelectorAll('input:checked')].map(i => Number(i.value)),from:$('from').value,to:$('to').value,interval:$('interval').value };
+  return { jitterMinutes:$('jitter-enabled').checked ? (/^\d+$/.test($('jitter-minutes').value) && Number($('jitter-minutes').value) >= 1 ? Number($('jitter-minutes').value) : -1) : 0, id:editing, recipient:state.recipients.find(r => r.jid === $('recipient').value), text:$('message').value,kind:$('schedule-kind').value,once:`${$('once-date').value}T${$('once-time').value}`,days:[...$('weekdays').querySelectorAll('input:checked')].map(i => Number(i.value)),from:$('from').value,to:$('to').value,interval:$('interval').value };
 }
 for (const day of [1,2,3,4,5,6,0]) { const label = element('label'), input = element('input'); input.type='checkbox'; input.value=String(day); label.append(input,dayNames[day]); $('weekdays').append(label); }
 for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click',()=> { for(const t of document.querySelectorAll('.tab')) { t.classList.toggle('selected',t === tab); $(`${t.dataset.tab}-panel`).hidden = t !== tab; } });
@@ -94,6 +97,7 @@ $('logout').addEventListener('click',()=>action(async()=> {
 }));
 $('copy-diagnostics').addEventListener('click',()=>action(async()=>{ await call('diagnostics');notice('Diagnostics copied. Paste the report into the support chat.'); }));
 $('new').addEventListener('click',()=>openEditor());
+$('jitter-enabled').addEventListener('change',showJitter);
 $('schedule-kind').addEventListener('change',showKind);
 $('recipient-search').addEventListener('input',()=>renderRecipients());
 for(const input of document.querySelectorAll('input[name="recipient-kind"]')) input.addEventListener('change',()=> { $('recipient-search').value='';renderRecipients(''); });

@@ -43,6 +43,9 @@
     <label for="schedule-kind">Schedule</label><select id="schedule-kind"><option value="once">One-time</option><option value="weekly">Weekly recurring</option></select>
     <div id="once-fields" class="columns"><label>Date<input id="once-date" type="date"></label><label>Time<input id="once-time" type="time" step="60"></label></div>
     <div id="weekly-fields" hidden><div id="weekdays" class="days"></div><div class="columns"><label>From<input id="from" type="time" value="08:00" step="60"></label><label>To<input id="to" type="time" value="08:00" step="60"></label><label>Every<input id="interval" type="text" inputmode="numeric" value="00:30" placeholder="HH:MM" maxlength="5"></label></div><p class="muted small">When From = To, one message is sent on each selected day. Overnight ranges are not supported.</p></div>
+    <label class="check"><input id="jitter-enabled" type="checkbox">Enable jitter</label>
+    <label id="jitter-field" hidden>Jitter (minutes)<input id="jitter-minutes" type="number" min="1" max="1440" step="1" value="5" inputmode="numeric"></label>
+    <p id="jitter-note" class="muted small" hidden>Each execution moves 1 to this many whole minutes earlier or later, never to the original minute. May cross midnight or the From–To boundaries. Messages missed beyond this window are skipped. Send test remains immediate.</p>
     <p class="muted small">Schedules use this computer’s local time.</p>
     <p id="form-error" class="error" role="alert" hidden></p><p id="test-result" role="status" hidden></p>
     <div class="actions"><button type="button" id="test">Send test</button><button type="button" id="cancel">Cancel</button><button type="submit" id="save" class="primary">Save</button></div>

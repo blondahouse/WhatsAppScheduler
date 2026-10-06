@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, powerMoni
 import { release as osRelease } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 import { appendFileSync, existsSync, statSync, renameSync } from 'node:fs';
 import { Store } from './store.ts';
 import { Scheduler } from './scheduler.ts';
@@ -83,7 +83,7 @@ else {
           if (payload.id && !old) throw new Error('This schedule no longer exists.');
           if (old && scheduler.inFlight.has(old.id)) throw new Error('Wait for the current send to finish.');
           const now = Date.now();
-          const s: Schedule = { id: old?.id || randomUUID(), recipient: r, text: payload.text, enabled: true, kind: payload.kind, once: payload.once, days: payload.days, from: payload.from, to: payload.to, interval: payload.interval, createdAt: old?.createdAt || now, updatedAt: now, notBefore: now, status: 'active', consumed: old?.consumed || {}, floorDate: old?.floorDate || '' };
+          const s: Schedule = { id: old?.id || randomUUID(), recipient: r, text: payload.text, enabled: true, kind: payload.kind, once: payload.once, days: payload.days, from: payload.from, to: payload.to, interval: payload.interval, jitterMinutes: payload.jitterMinutes || 0, jitterSeed: payload.jitterMinutes ? (old?.jitterSeed || randomBytes(32).toString('hex')) : old?.jitterSeed, createdAt: old?.createdAt || now, updatedAt: now, notBefore: now, status: 'active', consumed: old?.consumed || {}, floorDate: old?.floorDate || '' };
           store.change(d => { d.schedules = [...d.schedules.filter(x => x.id !== s.id), s]; });
         } else if (action === 'delete' || action === 'toggle') {
           const s = store.data.schedules.find(s => s.id === payload);

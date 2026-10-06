@@ -1,12 +1,33 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { localDate, minutes, parseLocal, type Attempt, type Recipient, type Schedule } from './model.ts';
 import { Store } from './store.ts';
-export type Slot = { key: string; at: number; day: string; minute: number };
+export type Slot = { key: string; at: number; day: string; minute: number; nominalAt?: number; jitterOffset?: number };
+function wallMinute(at: number): string {
+  const d = new Date(at);
+  return `${localDate(d)}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+export function shifted(s: Schedule, slot: Slot): Slot {
+  const jitter = s.jitterMinutes || 0;
+  if (!jitter) return slot;
+  if (!s.jitterSeed) throw new Error('Missing persistent jitter seed');
+  // A random seed stored with the schedule gives each nominal execution an
+  // unpredictable, restart-stable offset. Zero is never in the sample space.
+  const sample = createHash('sha256').update(`${s.jitterSeed}:${slot.key}`).digest().readUInt32BE(0);
+  for (let attempt = 0; attempt < 2 * jitter; attempt++) {
+    const index = (sample + attempt) % (2 * jitter);
+    const offset = index < jitter ? index - jitter : index - jitter + 1;
+    const at = slot.at + offset * 60000;
+    // During DST fall-back, a nonzero elapsed offset can equal the original
+    // local wall minute. Exclude that case too.
+    if (wallMinute(at) !== slot.key) return { ...slot, at, nominalAt: slot.at, jitterOffset: offset };
+  }
+  throw new Error('No valid jitter offset');
+}
 export function executions(s: Schedule, date: Date): Slot[] {
   const day = localDate(date);
   if (s.kind === 'once') {
     const d = parseLocal(s.once!);
-    return localDate(d) === day ? [{ key: s.once!, at: d.getTime(), day, minute: d.getHours() * 60 + d.getMinutes() }] : [];
+    return localDate(d) === day ? [shifted(s, { key: s.once!, at: d.getTime(), day, minute: d.getHours() * 60 + d.getMinutes() })] : [];
   }
   if (!s.days!.includes(date.getDay())) return [];
   const out: Slot[] = [];
@@ -16,13 +37,29 @@ export function executions(s: Schedule, date: Date): Slot[] {
     if (d.getHours() * 60 + d.getMinutes() !== m) continue;
     out.push({ key: `${day}T${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`, at: d.getTime(), day, minute: m });
   }
+  return out.map(slot => shifted(s, slot));
+}
+export function candidateSlots(s: Schedule, now: number): Slot[] {
+  if (s.kind === 'once') return executions(s, parseLocal(s.once!));
+  const out: Slot[] = [];
+  // Jitter up to one day can bring tomorrow's nominal slots into today, or
+  // yesterday's slots into today. Include a further day for grace recovery.
+  for (let delta = -2; delta <= 1; delta++) {
+    const date = new Date(now); date.setDate(date.getDate() + delta);
+    out.push(...executions(s, date));
+  }
   return out;
 }
 export function latestDue(s: Schedule, now: number): Slot | undefined {
-  if (s.kind === 'once') return executions(s, parseLocal(s.once!)).find(x => x.at <= now);
-  const today = new Date(now), yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  return [...executions(s, yesterday), ...executions(s, today)].filter(x => x.at <= now && x.at >= s.notBefore).sort((a, b) => b.at - a.at)[0];
+  return candidateSlots(s, now).filter(x => x.at <= now && x.at >= s.notBefore).sort((a, b) => b.at - a.at)[0];
+}
+export function dueSlots(s: Schedule, now: number): Slot[] {
+  const due = candidateSlots(s, now).filter(x => x.at <= now && x.at >= s.notBefore && !consumed(s, x));
+  if (!s.jitterMinutes) return due.sort((a,b) => b.at - a.at).slice(0,1);
+  const current = due.filter(x => now - x.at < 60000);
+  // Preserve separate normal executions even when independent jitters collide.
+  // After sleep/offline, coalesce older missed executions into only one.
+  return current.length ? current.sort((a,b) => a.at - b.at) : due.sort((a,b) => b.at - a.at).slice(0,1);
 }
 export function executionId(s: Schedule, slot: Slot): string { return `${s.id}:${slot.key}`; }
 export function consumed(s: Schedule, slot: Slot): boolean {
@@ -45,8 +82,8 @@ export class Scheduler {
       for (const snapshot of [...this.store.data.schedules]) {
         const s = this.store.data.schedules.find(x => x.id === snapshot.id);
         if (!s || !s.enabled || s.status === 'completed') continue;
-        let slot: Slot | undefined;
-        try { slot = latestDue(s, now); }
+        let selected: Slot[];
+        try { selected = dueSlots(s, now); }
         catch {
           this.store.change(d => {
             const live = d.schedules.find(x => x.id === s.id)!;
@@ -55,21 +92,24 @@ export class Scheduler {
           });
           this.changed(); continue;
         }
-        if (!slot || consumed(s, slot)) continue;
+        for (const slot of selected) {
+        if (consumed(this.store.data.schedules.find(x => x.id === s.id)!, slot)) continue;
         const grace = this.store.data.settings.grace;
         // "No missed" still accepts the normal 30-second loop within the intended minute.
-        const expired = now - slot.at >= (grace === 0 ? 60000 : grace * 60000 + 1);
+        const outsideJitter = !!s.jitterMinutes && now >= slot.nominalAt! + s.jitterMinutes * 60000 + 60000;
+        const expired = outsideJitter || now - slot.at >= (grace === 0 ? 60000 : grace * 60000 + 1);
+        // Never catch up inside the original nominal minute. Network delivery
+        // still depends on WhatsApp; this controls when the app starts sending.
+        if (!expired && s.jitterMinutes && wallMinute(now) === slot.key) continue;
         if (!expired && !this.connected()) continue;
         const id = executionId(s, slot);
-        const attempt: Attempt = { id, scheduleId: s.id, slot: slot.key, at: now, recipient: s.recipient, result: expired ? 'skipped' : 'sending' };
+        const attempt: Attempt = { id, scheduleId: s.id, slot: slot.key, plannedAt: slot.at, jitterOffset: slot.jitterOffset, at: now, recipient: s.recipient, result: expired ? 'skipped' : 'sending' };
         this.store.change(d => {
           const live = d.schedules.find(x => x.id === s.id)!;
           // Consume every older due slot, so catch-up cannot emit a backlog later.
-          for (const day of [new Date(now - 86400000), new Date(now)]) {
-            for (const x of executions(live, day)) if (x.at <= slot.at) {
-              const values = live.consumed[x.day] ||= [];
-              if (!values.includes(x.minute)) values.push(x.minute);
-            }
+          for (const x of candidateSlots(live, now)) if (x.at <= now && !selected.some(other => other.key === x.key && other.key !== slot.key)) {
+            const values = live.consumed[x.day] ||= [];
+            if (!values.includes(x.minute)) values.push(x.minute);
           }
           const values = live.consumed[slot.day] ||= [];
           if (!values.includes(slot.minute)) values.push(slot.minute);
@@ -78,11 +118,12 @@ export class Scheduler {
           if (floorKey > live.floorDate) live.floorDate = floorKey;
           for (const day of Object.keys(live.consumed)) if (day < live.floorDate) delete live.consumed[day];
           if (expired && s.kind === 'once') { live.enabled = false; live.status = 'error'; live.error = 'The send time was missed.'; }
-          if (expired) attempt.error = 'Skipped: the delay exceeds the selected limit.';
+          if (expired) attempt.error = outsideJitter ? 'Skipped: the jitter window has ended.' : 'Skipped: the delay exceeds the selected limit.';
           d.history.push(attempt);
         });
         this.changed();
         if (!expired) await this.deliver(attempt, s.text);
+        }
       }
     } finally { this.busy = false; }
   }
