@@ -59,7 +59,7 @@ function renderRecipients(selected = $('recipient').value) {
   const counts = new Map(); for (const r of rs) counts.set(r.name,(counts.get(r.name)||0)+1);
   for (const r of rs) $('recipient').append(new Option(counts.get(r.name) > 1 ? `${r.name} · ${r.jid.split('@')[0]}` : r.name,r.jid));
   $('recipient').value = selected;
-  $('recipient-note').textContent = rs.length ? '' : 'Нет доступных чатов. Дождитесь синхронизации или нажмите «Обновить списки».';
+  $('recipient-note').textContent = rs.length ? '' : query ? 'По вашему запросу ничего не найдено.' : kind === 'personal' ? 'Ожидаем личные чаты с телефона. Откройте WhatsApp на телефоне и отправьте или получите сообщение в нужном чате. Он появится здесь автоматически.' : 'Нет доступных групп. Нажмите «Обновить списки».';
 }
 function showKind() { const weekly = $('schedule-kind').value === 'weekly'; $('weekly-fields').hidden = !weekly; $('once-fields').hidden = weekly; }
 function openEditor(s) {

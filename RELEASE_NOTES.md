@@ -1,11 +1,14 @@
-# WhatsApp Scheduler v0.1.1
+# WhatsApp Scheduler v0.1.2
 
-Fix first-run QR connection: register as a standard web companion instead of requesting native Windows full-history synchronization. The native full-history handshake was closed by WhatsApp before issuing a QR.
+Исправлена синхронизация личных чатов:
 
-Add visible QR-loading instructions, connection error diagnostics and a Retry connection button. Existing schedules and encrypted sessions are preserved.
+- История сообщений теперь восстанавливает список личных чатов даже при пустом массиве chats.
+- Новые входящие и исходящие сообщения на телефоне автоматически добавляют личный чат.
+- Нормализация адресов связанных устройств и имена из PN/LID контактов.
+- Полная история запрашивается через совместимый WEB_BROWSER/Chrome handshake, без нативного WIN32 режима.
+- Видны отдельные счётчики личных чатов и групп, понятная инструкция при пустом списке.
+- Сессия и расписания сохраняются при обновлении.
 
-Windows release verification now includes a live WhatsApp QR request in the installed executable, with a fresh DPAPI-encrypted profile. No account is linked and no message is sent in this check.
+Проверки: 29 автоматических тестов, сборка NSIS, установка и UI smoke на Windows runner, настоящий QR в установленном приложении без привязки аккаунта. Реальная загрузка истории аккаунта и отправка требуют проверки с телефоном пользователя.
 
-Download **WhatsAppScheduler-Setup-x64.exe**. Exit the previous version from the system tray before installing. Unsigned installer: **More info → Run anyway** if SmartScreen prompts.
-
-Real account linking, chat sync and sends still require the user's first-run verification.
+Перед обновлением: **Выход** в tray, затем установка поверх предыдущей версии. Windows 10/11 x64; installer unsigned.

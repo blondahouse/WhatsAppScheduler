@@ -5,14 +5,15 @@ import QRCode from 'qrcode';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { atomicWrite, Store } from './store.ts';
-import { validRecipient, type Recipient } from './model.ts';
+import { type Recipient } from './model.ts';
+import { RecipientSync, chatJid } from './recipients.ts';
 
 export class WhatsApp {
   store: Store; directory: string; changed: () => void;
   socket?: WASocket; state?: AuthenticationState;
   status = 'Подключение…'; qr = ''; syncNote = ''; error = '';
   stopping = false; retries = 0; timer?: ReturnType<typeof setTimeout>;
-  names = new Map<string, string>(); generation = 0;
+  recipients = new RecipientSync(); generation = 0;
   report: (error: unknown) => void;
   auth: { creds: ReturnType<typeof initAuthCreds>; keys: Record<string, unknown> } | undefined;
   writes: Promise<void> = Promise.resolve();
@@ -61,7 +62,7 @@ export class WhatsApp {
         }
       };
       await this.saveAuth();
-      const socket = makeWASocket({ auth: this.state, logger: pino({ level: 'silent' }), browser: Browsers.windows('Desktop'), syncFullHistory: false, markOnlineOnConnect: false, connectTimeoutMs: 30000, defaultQueryTimeoutMs: 30000 });
+      const socket = makeWASocket({ auth: this.state, logger: pino({ level: 'silent' }), browser: Browsers.ubuntu('Chrome'), syncFullHistory: true, markOnlineOnConnect: false, connectTimeoutMs: 30000, defaultQueryTimeoutMs: 30000 });
       this.socket = socket;
       const active = () => generation === this.generation && !this.stopping;
       socket.ev.on('creds.update', update => {
@@ -88,7 +89,7 @@ export class WhatsApp {
               await this.writes.catch(() => {});
               rmSync(join(this.directory, 'auth.enc'), { force: true });
               this.auth = undefined; this.writes = Promise.resolve();
-              this.store.change(d => { d.recipients = []; }); this.names.clear();
+              this.store.change(d => { d.recipients = []; }); this.recipients.names.clear();
               this.status = 'Требуется повторная авторизация';
               this.syncNote = 'Сессия WhatsApp завершена. Отсканируйте QR-код снова.';
               this.scheduleReconnect(1000);
@@ -100,29 +101,36 @@ export class WhatsApp {
           this.changed();
         })().catch(() => this.fatalAuth());
       });
-      const contacts = (list: Array<{ id: string; name?: string; notify?: string; verifiedName?: string }>) => {
-        if (!active()) return;
-        for (const c of list) if (c.name || c.notify || c.verifiedName) this.names.set(c.id, c.name || c.notify || c.verifiedName!);
-        this.store.change(d => { for (const r of d.recipients) r.name = this.names.get(r.jid) || r.name; }); this.changed();
+      const updated = () => {
+        this.syncNote = this.recipients.note(this.store.data.recipients);
+        if (!this.store.data.recipients.some(r => r.kind === 'personal')) this.syncNote += ' Ожидаем историю с телефона. Откройте WhatsApp на телефоне; новые личные сообщения также добавляют чат в список.';
+        this.changed();
       };
-      const chats = (list: Array<{ id: string; name?: string | null }>) => {
+      const contacts = (list: Parameters<RecipientSync['contacts']>[1]) => {
+        if (!active()) return;
+        this.store.change(d => this.recipients.contacts(d.recipients, list)); updated();
+      };
+      const chats = (list: Parameters<RecipientSync['chats']>[1]) => {
+        if (!active()) return;
+        this.store.change(d => this.recipients.chats(d.recipients, list)); updated();
+      };
+      socket.ev.on('messaging-history.set', history => {
         if (!active()) return;
         this.store.change(d => {
-          for (const c of list) {
-            const kind = c.id.endsWith('@g.us') ? 'group' : 'personal';
-            const r: Recipient = { jid: c.id, kind, name: this.names.get(c.id) || c.name || (kind === 'group' ? c.id.split('@')[0] : c.id.endsWith('@lid') ? `Чат ${c.id.split('@')[0]}` : `+${c.id.split('@')[0]}`) };
-            if (!validRecipient(r)) continue;
-            const prev = d.recipients.find(x => x.jid === r.jid);
-            if (prev) { if (c.name || this.names.has(c.id)) prev.name = r.name; } else d.recipients.push(r);
-          }
-        }); this.changed();
-      };
-      socket.ev.on('messaging-history.set', history => { contacts(history.contacts); chats(history.chats); this.syncNote = `Синхронизировано чатов: ${this.store.data.recipients.length}.`; this.changed(); });
+          this.recipients.contacts(d.recipients, history.contacts);
+          this.recipients.chats(d.recipients, history.chats);
+          this.recipients.messages(d.recipients, history.messages);
+        }); updated();
+      });
+      socket.ev.on('messages.upsert', event => {
+        if (!active()) return;
+        this.store.change(d => this.recipients.messages(d.recipients, event.messages)); updated();
+      });
       socket.ev.on('contacts.upsert', contacts);
-      socket.ev.on('contacts.update', updates => contacts(updates.filter(c => c.id) as any));
+      socket.ev.on('contacts.update', contacts);
       socket.ev.on('chats.upsert', chats);
-      socket.ev.on('chats.update', updates => chats(updates.filter(c => c.id) as any));
-      socket.ev.on('chats.delete', ids => { if (active()) { this.store.change(d => { d.recipients = d.recipients.filter(r => !ids.includes(r.jid)); }); this.changed(); } });
+      socket.ev.on('chats.update', chats);
+      socket.ev.on('chats.delete', ids => { if (active()) { this.store.change(d => { d.recipients = d.recipients.filter(r => !ids.map(chatJid).includes(r.jid)); }); this.changed(); } });
     } catch (error) {
       this.report(error);
       this.status = 'Нет подключения'; this.error = 'Не удалось подключиться или открыть защищённую сессию. Проверьте интернет и перезапустите приложение. Данные сессии не удалены.';
@@ -153,7 +161,7 @@ export class WhatsApp {
     if (resync) {
       await this.socket.resyncAppState(['critical_block', 'critical_unblock_low', 'regular_high', 'regular_low', 'regular'], true);
     }
-    this.syncNote = 'Списки обновлены. Личные чаты дополняются при синхронизации и новых сообщениях.'; this.changed();
+    this.syncNote = this.recipients.note(this.store.data.recipients) + (this.store.data.recipients.some(r => r.kind === 'personal') ? ' Списки обновлены.' : ' Ожидаем историю с телефона. Откройте WhatsApp на телефоне; отправьте или получите сообщение в нужном личном чате.'); this.changed();
   }
   async send(r: Recipient, text: string, messageId: string): Promise<void> {
     if (!this.connected || !this.socket) throw new Error('Нет соединения с WhatsApp.');
