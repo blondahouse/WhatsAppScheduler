@@ -8,7 +8,7 @@ permissions:
   contents: write
 concurrency:
   group: windows-release
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: windows-latest
@@ -87,6 +87,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release view $tag --json url,assets
 
+      - name: Verify README download URL
+        shell: pwsh
+        run: |
           $download = "https://github.com/blondahouse/WhatsAppScheduler/releases/latest/download/WhatsAppScheduler-Setup-x64.exe"
           $response = Invoke-WebRequest -Uri $download -Method Head -MaximumRedirection 10
           if ($response.StatusCode -ne 200) { throw "README download link failed: $($response.StatusCode)" }
