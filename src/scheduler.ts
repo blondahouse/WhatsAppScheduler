@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { localDate, minutes, parseLocal, type Attempt, type Recipient, type Schedule } from './model.ts';
 import { Store } from './store.ts';
+import { PersistenceError } from './connection-policy.ts';
 export type Slot = { key: string; at: number; day: string; minute: number; nominalAt?: number; jitterOffset?: number };
 function wallMinute(at: number): string {
   const d = new Date(at);
@@ -138,7 +139,8 @@ export class Scheduler {
         const s = d.schedules.find(x => x.id === attempt.scheduleId);
         if (s) { s.error = undefined; s.status = s.kind === 'once' ? 'completed' : s.enabled ? 'active' : 'paused'; if (s.kind === 'once') s.enabled = false; }
       });
-    } catch {
+    } catch (cause) {
+      if (cause instanceof PersistenceError) throw cause;
       const error = 'Sending is not confirmed. Check WhatsApp. Automatic retry is disabled to avoid a duplicate.';
       this.store.change(d => {
         const h = d.history.find(x => x.id === attempt.id)!; h.result = 'uncertain'; h.error = error;

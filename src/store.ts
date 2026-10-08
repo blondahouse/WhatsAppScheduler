@@ -1,9 +1,11 @@
 import { mkdirSync, readFileSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { defaults, type Data } from './model.ts';
+import { PersistenceError } from './connection-policy.ts';
 
 // Never continue after a failed write. Claiming must be durable before network I/O.
 export function atomicWrite(path: string, contents: string | Buffer): void {
+  try {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.tmp`;
   const fd = openSync(tmp, 'w', 0o600);
@@ -13,6 +15,7 @@ export function atomicWrite(path: string, contents: string | Buffer): void {
     const dir = openSync(dirname(path), 'r');
     try { fsyncSync(dir); } finally { closeSync(dir); }
   }
+  } catch (cause) { throw new PersistenceError(path.endsWith('auth.enc') ? 'protected session' : 'local data', cause); }
 }
 export class Store {
   path: string;

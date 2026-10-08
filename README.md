@@ -129,3 +129,11 @@ Enable **Jitter** in a schedule and enter a whole number of minutes from 1 to 14
 A random 256-bit seed is persisted per schedule. SHA-256(seed, nominal slot) deterministically selects a nonzero integer offset, so restarting does not redraw it. Original nominal slot keys remain the identity and duplicate-protection key; only the due timestamp shifts. Candidate generation includes adjacent nominal days for midnight crossing. Times follow the computer’s current local timezone. DST fall-back offsets that reproduce the nominal wall minute are excluded. Existing schedules default to jitter disabled.
 
 Normal simultaneous jitter executions are sent separately. After sleep/offline, older missed executions coalesce into at most one catch-up send. Recovery is limited by both the grace period and the final jitter minute. A catch-up send never starts in its nominal minute; after the jitter window it is skipped. History stores the shifted planned timestamp, offset and actual attempt time. Jitter controls the start of the send, not the eventual arrival time at the recipient, which depends on WhatsApp and the network.
+
+## Восстановление подключения (v0.1.7)
+
+Ошибки `ack`/500 и временные обрывы больше не удаляют сохранённую сессию и имена чатов. Приложение ждёт завершения записи ключей и подключается повторно с той же сессией. Код 515 означает запрос WhatsApp на перезапуск соединения; повторная привязка для него не требуется. Новый QR автоматически запрашивается после подтверждённого выхода устройства (401).
+
+Код 408 может означать как сетевой тайм-аут, так и истечение времени QR. Во втором случае приложение останавливает автоматические повторы: нажмите **Reconnect** для нового QR. При замене соединения другим экземпляром (440) закройте другой экземпляр и нажмите **Reconnect**. При отказах 403/411 автоматические повторы также прекращаются, а сохранённая сессия остаётся на диске.
+
+**Copy diagnostics** содержит последние 20 отключений: время, код, безопасную категорию причины и выбранное действие. В журнале отдельно отмечаются ошибки записи/шифрования с исходной причиной. Прочие необработанные ошибки больше не выдаются за нехватку места на диске; отправка при них останавливается до перезапуска. Исправление предотвращает ошибочное локальное удаление сессии, но не отменяет отзыв связанного устройства со стороны WhatsApp.

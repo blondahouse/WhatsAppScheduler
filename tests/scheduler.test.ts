@@ -7,10 +7,24 @@ import { execFileSync } from 'node:child_process';
 import { executions, Scheduler, latestDue, consumed } from '../src/scheduler.ts';
 import { validate, parseLocal, type Schedule, type Recipient } from '../src/model.ts';
 import { Store } from '../src/store.ts';
+import { PersistenceError } from '../src/connection-policy.ts';
 const monday = new Date(2026, 9, 12);
 const at = (h: number, m = 0) => new Date(2026, 9, 12, h, m).getTime();
 const personal: Recipient = { jid: '380501234567@s.whatsapp.net', name: 'Marina', kind: 'personal' };
 const group: Recipient = { jid: '1203630123456789@g.us', name: '3 рота', kind: 'group' };
+test('a persistence failure after sending is propagated and keeps the durable sending claim', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'wa-persistence-'));
+  try {
+    const store = new Store(join(directory, 'state.json'));
+    const engine = new Scheduler(store, async () => {
+      store.change = () => { throw new PersistenceError('local data', new Error('disk failure')); };
+    }, () => true);
+    await assert.rejects(engine.test(personal, 'test'), PersistenceError);
+    assert.equal(store.data.history[0].result, 'sending');
+    assert.equal(JSON.parse(readFileSync(store.path, 'utf8')).history[0].result, 'sending');
+    assert.equal(engine.inFlight.size, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 function schedule(overrides: Partial<Schedule> = {}): Schedule {
   return { id:'schedule-1',recipient:personal,text:'Доброе утро\n🙂',enabled:true,kind:'weekly',days:[1],from:'08:00',to:'12:00',interval:'00:30',createdAt:at(0),updatedAt:at(0),notBefore:at(0),status:'active',consumed:{},floorDate:'',...overrides };
 }

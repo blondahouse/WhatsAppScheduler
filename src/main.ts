@@ -8,6 +8,7 @@ import { Store } from './store.ts';
 import { Scheduler } from './scheduler.ts';
 import { WhatsApp } from './whatsapp.ts';
 import { validate, validRecipient, type Schedule } from './model.ts';
+import { failureMessage, PersistenceError } from './connection-policy.ts';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const smoke = process.env.WASCHEDULER_SMOKE === '1';
@@ -26,7 +27,8 @@ else {
       const file = join(dataDir, 'debug.log');
       try {
         if (existsSync(file) && statSync(file).size > 1000000) renameSync(file, `${file}.previous`);
-        appendFileSync(file, `${new Date().toISOString()} ${e instanceof Error ? e.stack : 'Internal error'}\n`);
+        const details = e instanceof Error ? `${e.stack}${e.cause instanceof Error ? `\nCaused by: ${e.cause.stack}` : ''}` : 'Non-Error exception';
+        appendFileSync(file, `${new Date().toISOString()} ${details}\n`);
       } catch { /* Do not reveal errors in UI. */ }
     };
     store = new Store(join(dataDir, 'state.json'));
@@ -38,8 +40,8 @@ else {
       try { await wa.send(r, text, id); } catch (e) { debug(e); throw e; }
     }, () => smoke || wa.connected, changed);
     const fatal = (e: unknown) => {
-      debug(e); clearInterval(timer); wa.fatalAuth();
-      dialog.showErrorBox('WhatsApp Scheduler', 'Unable to save data. Sending has stopped. Check available disk space and restart the app.');
+      debug(e); clearInterval(timer); wa.halt(failureMessage(e));
+      dialog.showErrorBox('WhatsApp Scheduler', failureMessage(e));
     };
     process.on('uncaughtException', fatal);
     process.on('unhandledRejection', fatal);
@@ -110,6 +112,7 @@ else {
         } else throw new Error('Invalid request.');
         changed(); return { ok: true, data: state() };
       } catch (e) {
+        if (e instanceof PersistenceError) fatal(e);
         debug(e);
         const text = e instanceof Error ? e.message : '';
         // Only allow errors deliberately written for users, never dependency exceptions.

@@ -1,4 +1,4 @@
-import makeWASocket, { BufferJSON, DisconnectReason, initAuthCreds, proto, Browsers, type AuthenticationState, type WASocket } from '@whiskeysockets/baileys';
+import makeWASocket, { BufferJSON, initAuthCreds, proto, Browsers, type AuthenticationState, type WASocket } from '@whiskeysockets/baileys';
 import { safeStorage } from 'electron';
 import pino from 'pino';
 import QRCode from 'qrcode';
@@ -9,6 +9,7 @@ import { type Recipient } from './model.ts';
 import { RecipientSync, chatJid } from './recipients.ts';
 import { forceContactSnapshot, recipientCounts, refreshSummary } from './contact-refresh.ts';
 import { recoverStalledEvents, SyncHealth } from './sync-health.ts';
+import { disconnectAction, failureMessage, PersistenceError } from './connection-policy.ts';
 
 export class WhatsApp {
   store: Store; directory: string; changed: () => void;
@@ -21,23 +22,35 @@ export class WhatsApp {
   report: (error: unknown) => void;
   auth: { creds: ReturnType<typeof initAuthCreds>; keys: Record<string, unknown> } | undefined;
   writes: Promise<void> = Promise.resolve();
+  connecting?: Promise<void>;
+  closing?: Promise<void>;
+  disconnects: { at: string; code: number | null; reason: string; action: string; registered: boolean }[] = [];
   constructor(store: Store, directory: string, changed: () => void, report: (error: unknown) => void = () => {}) { this.store = store; this.directory = directory; this.changed = changed; this.report = report; this.recipients = new RecipientSync(store.data.recipientMetadata); store.change(d => this.recipients.contacts(d.recipients, [])); }
   get connected(): boolean { return this.status === 'WhatsApp connected'; }
   async saveAuth(): Promise<void> {
     this.writes = this.writes.then(async () => {
       const plain = JSON.stringify(this.auth, BufferJSON.replacer);
-      const encrypted = await safeStorage.encryptStringAsync(plain);
-      atomicWrite(join(this.directory, 'auth.enc'), encrypted);
+      try {
+        const encrypted = await safeStorage.encryptStringAsync(plain);
+        atomicWrite(join(this.directory, 'auth.enc'), encrypted);
+      } catch (cause) { throw cause instanceof PersistenceError ? cause : new PersistenceError('protected session', cause); }
     });
     // An encryption/disk failure stops networking; never use unsaved Signal keys.
     await this.writes;
   }
   async connect(): Promise<void> {
+    if (this.connecting) return this.connecting;
+    this.connecting = this.openSocket();
+    try { await this.connecting; } finally { this.connecting = undefined; }
+  }
+  private async openSocket(): Promise<void> {
+    await this.closing;
     if (this.stopping) return;
+    clearTimeout(this.timer);
     clearInterval(this.syncTimer);
     this.health.pendingReceived = false;
     const generation = ++this.generation;
-    this.status = 'Connecting…'; this.error = ''; this.changed();
+    this.status = 'Connecting…'; this.error = ''; this.syncNote = 'Connecting to WhatsApp…'; this.refreshResult = ''; this.changed();
     try {
       if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('Windows protected storage is unavailable. Restart the app.');
       if (!this.auth) {
@@ -63,11 +76,12 @@ export class WhatsApp {
             for (const [type, values] of Object.entries(data)) for (const [id, value] of Object.entries(values || {})) {
               if (value === null) delete auth.keys[`${type}:${id}`]; else auth.keys[`${type}:${id}`] = value;
             }
-            await this.saveAuth();
+            try { await this.saveAuth(); } catch (error) { this.fatalAuth(error); throw error; }
           }
         }
       };
       await this.saveAuth();
+      if (this.stopping || generation !== this.generation) return;
       const socket = makeWASocket({ auth: this.state, logger: pino({ level: 'warn' }, { write: line => {
         try { const entry = JSON.parse(line); this.health.warning(entry.msg); } catch { /* Never keep raw protocol logs. */ }
       } }), browser: Browsers.ubuntu('Chrome'), syncFullHistory: true, markOnlineOnConnect: false, connectTimeoutMs: 30000, defaultQueryTimeoutMs: 30000 });
@@ -76,7 +90,7 @@ export class WhatsApp {
       socket.ev.on('creds.update', update => {
         if (!active()) return;
         Object.assign(auth.creds, update);
-        void this.saveAuth().catch(() => this.fatalAuth());
+        void this.saveAuth().catch(error => this.fatalAuth(error));
       });
       socket.ev.on('connection.update', update => {
         if (!active()) return;
@@ -94,31 +108,20 @@ export class WhatsApp {
               }
             }, 30000);
             this.syncNote = 'Syncing chats…'; this.changed();
-            void this.refresh(false).catch(() => { this.syncNote = 'Unable to refresh groups. Try Refresh lists.'; this.changed(); });
+            void this.refresh(false).catch(error => {
+              if (error instanceof PersistenceError) { this.fatalAuth(error); return; }
+              if (active()) { this.syncNote = 'Unable to refresh groups. Try Refresh lists.'; this.changed(); }
+            });
           }
           if (update.connection === 'close') {
             clearInterval(this.syncTimer);
             ++this.generation; // Ignore late events from the disconnected socket.
             this.qr = ''; this.socket = undefined;
-            const code = (update.lastDisconnect?.error as any)?.output?.statusCode;
-            this.health.lastDisconnectCode = typeof code === 'number' ? code : null;
-            this.report(update.lastDisconnect?.error || new Error('WhatsApp connection closed'));
-            this.error = `The WhatsApp connection closed${code ? ` (code ${code})` : ''}. The app will reconnect automatically.`;
-            if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession) {
-              await this.writes.catch(() => {});
-              rmSync(join(this.directory, 'auth.enc'), { force: true });
-              this.auth = undefined; this.writes = Promise.resolve();
-              this.store.change(d => { d.recipients = []; d.recipientMetadata = {}; }); this.recipients.clear();
-              this.status = 'Scan QR to sign in';
-              this.syncNote = 'The WhatsApp session ended. Scan the QR code again.';
-              this.scheduleReconnect(1000);
-            } else {
-              this.status = 'Disconnected';
-              this.scheduleReconnect(Math.min(60000, 2000 * 2 ** Math.min(this.retries++, 5)));
-            }
+            this.closing = this.handleClose(update.lastDisconnect?.error);
+            try { await this.closing; } finally { this.closing = undefined; }
           }
           this.changed();
-        })().catch(() => this.fatalAuth());
+        })().catch(error => { this.report(error); this.halt(failureMessage(error)); });
       });
       const updated = () => {
         if (!this.refreshing) this.syncNote = this.recipients.note(this.store.data.recipients);
@@ -159,18 +162,61 @@ export class WhatsApp {
       socket.ev.on('chats.delete', ids => { if (active()) { this.store.change(d => { d.recipients = d.recipients.filter(r => !ids.map(chatJid).includes(r.jid)); }); this.changed(); } });
     } catch (error) {
       this.report(error);
+      if (error instanceof PersistenceError) { this.halt(failureMessage(error)); return; }
+      if (this.stopping || generation !== this.generation) return;
       this.status = 'Disconnected'; this.error = 'Unable to connect or open the protected session. Check your internet connection and restart the app. Your session data has been preserved.';
       this.changed(); this.scheduleReconnect(30000);
     }
   }
-  fatalAuth(): void {
-    clearInterval(this.syncTimer);
-    this.stopping = true; ++this.generation; this.socket?.end(new Error('Auth persistence failed'));
-    this.status = 'Disconnected'; this.error = 'Unable to save the protected session. Sending has stopped. Check available disk space and restart the app.'; this.changed();
+  private async handleClose(error: unknown): Promise<void> {
+    const raw = error as { output?: { statusCode?: unknown }; message?: string } | undefined;
+    const code = typeof raw?.output?.statusCode === 'number' ? raw.output.statusCode : null;
+    const message = typeof raw?.message === 'string' ? raw.message : '';
+    const action = disconnectAction(code, message);
+    // Keep only known categories; raw protocol payloads can contain private data.
+    const reason = message === 'QR refs attempts ended' ? 'qr-expired'
+      : message.startsWith('Stream Errored (ack)') ? 'stream-ack'
+      : message.startsWith('Stream Errored') ? 'stream-error' : 'connection';
+    const entry = { at: new Date().toISOString(), code, reason, action, registered: !!this.auth?.creds.registered };
+    this.disconnects = [...this.disconnects.slice(-19), entry];
+    this.health.lastDisconnectCode = code;
+    this.report(new Error(`WhatsApp disconnect ${JSON.stringify(entry)}`));
+    clearTimeout(this.timer); this.timer = undefined;
+    this.status = 'Disconnected'; this.refreshResult = '';
+    this.syncNote = 'Saved chat lists and session are preserved.';
+    this.error = `The WhatsApp connection closed${code !== null ? ` (code ${code})` : ''}. The app will reconnect automatically.`;
+    // Finish durable key writes before a replacement socket reads the session.
+    await this.writes;
+    if (this.stopping) return;
+    if (action === 'logout') {
+      rmSync(join(this.directory, 'auth.enc'), { force: true });
+      this.auth = undefined; this.state = undefined; this.writes = Promise.resolve();
+      this.store.change(d => { d.recipients = []; d.recipientMetadata = {}; }); this.recipients.clear();
+      this.syncNote = 'WhatsApp revoked this linked session (401). Scan a new QR code to sign in.';
+      this.error = 'WhatsApp signed out this device. A new QR sign-in is required.';
+      this.scheduleReconnect(1000);
+    } else if (action === 'qr-expired') {
+      this.syncNote = 'The QR code expired. Click Reconnect to get a new QR code.';
+      this.error = 'QR sign-in timed out. Automatic QR retries have stopped.';
+    } else if (action === 'manual') {
+      this.syncNote = code === 440 ? 'Another connection replaced this session. Close the other instance, then click Reconnect.' : 'WhatsApp rejected this connection. Check Linked devices on your phone, then click Reconnect.';
+      this.error = `WhatsApp stopped the connection (code ${code}). Automatic retries have stopped; your session is preserved.`;
+    } else if (action === 'restart') {
+      this.syncNote = 'WhatsApp requested a connection restart. Reconnecting with the saved session…';
+      this.error = ''; this.scheduleReconnect(1000);
+    } else this.scheduleReconnect(Math.min(60000, 2000 * 2 ** Math.min(this.retries++, 5)));
+  }
+  fatalAuth(error: unknown = new PersistenceError('protected session', undefined)): void {
+    this.report(error); this.halt(failureMessage(error));
+  }
+  halt(message: string): void {
+    clearInterval(this.syncTimer); clearTimeout(this.timer);
+    this.stopping = true; ++this.generation; this.socket?.end(undefined); this.socket = undefined; this.qr = '';
+    this.status = 'Disconnected'; this.error = message; this.syncNote = 'Sending is stopped. Restart the app; saved data is preserved.'; this.changed();
   }
   scheduleReconnect(ms: number): void {
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => { void this.connect(); }, ms);
+    this.timer = setTimeout(() => { this.timer = undefined; void this.connect(); }, ms);
   }
   async logout(): Promise<void> {
     if (!this.connected || !this.socket) throw new Error('No connection to WhatsApp.');
@@ -202,6 +248,9 @@ export class WhatsApp {
   async reconnect(): Promise<void> {
     if (this.status === 'Signing out…') throw new Error('Wait for sign out to finish.');
     if (this.stopping) throw new Error('Unable to connect. Restart the app to open the protected session.');
+    await this.closing;
+    await this.connecting;
+    if (this.stopping) throw new Error('Unable to connect. Restart the app to open the protected session.');
     clearTimeout(this.timer); clearInterval(this.syncTimer); ++this.generation;
     this.socket?.end(undefined); this.socket = undefined; this.qr = '';
     await this.connect();
@@ -230,7 +279,7 @@ export class WhatsApp {
       let snapshot = false, lookupFailed = false;
       this.syncNote = 'Requesting a full contact snapshot…'; this.changed();
       try { snapshot = await forceContactSnapshot(socket, active); }
-      catch (error) { this.report(error); }
+      catch (error) { if (error instanceof PersistenceError) throw error; this.report(error); }
       if (!active()) return;
       if (recoverStalledEvents(socket.ev, this.health.pendingReceived, Date.now() - this.openedAt)) this.health.bufferRecoveries++;
       // This lookup takes real phone numbers, NEVER anonymous LID digits.
@@ -247,7 +296,7 @@ export class WhatsApp {
               this.recipients.contacts(d.recipients, (mappings || []).map(mapping => ({ jid: chatJid(mapping.jid), lid: chatJid(mapping.lid) })));
               d.recipientMetadata = structuredClone(this.recipients.metadata);
             });
-          } catch (error) { this.report(error); lookupFailed = true; break; }
+          } catch (error) { if (error instanceof PersistenceError) throw error; this.report(error); lookupFailed = true; break; }
         }
       }
       if (!active()) return;
@@ -256,7 +305,7 @@ export class WhatsApp {
     } finally { this.refreshing = false; this.changed(); }
   }
   diagnostics() {
-    return { ...this.health.snapshot(this.socket?.ev.isBuffering() || false, this.store.data.recipients.filter(r => r.kind === 'personal').length, this.store.data.recipients.filter(r => r.kind === 'group').length), names: recipientCounts(this.store.data.recipients), refreshing: this.refreshing }; 
+    return { ...this.health.snapshot(this.socket?.ev.isBuffering() || false, this.store.data.recipients.filter(r => r.kind === 'personal').length, this.store.data.recipients.filter(r => r.kind === 'group').length), names: recipientCounts(this.store.data.recipients), refreshing: this.refreshing, disconnects: this.disconnects, sessionRegistered: !!this.auth?.creds.registered, reconnectScheduled: !!this.timer && !this.stopping }; 
   }
   async send(r: Recipient, text: string, messageId: string): Promise<void> {
     if (!this.connected || !this.socket) throw new Error('No connection to WhatsApp.');
